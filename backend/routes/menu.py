@@ -50,20 +50,6 @@ async def get_menu_by_category(category: str):
     }
 
 
-@router.get("/{item_id}", response_model=MenuItemResponse)
-async def get_menu_item(item_id: str):
-    """Get a single menu item by ID"""
-    item = await menu_service.get_item_by_id(item_id)
-    
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Menu item not found"
-        )
-    
-    return MenuItemResponse(**item)
-
-
 @router.get("/slug/{slug}", response_model=MenuItemResponse)
 async def get_menu_item_by_slug(slug: str):
     """Get a single menu item by slug"""
@@ -89,6 +75,20 @@ async def search_menu(query: str):
         "items": items,
         "total": len(items)
     }
+
+
+@router.get("/{item_id}", response_model=MenuItemResponse)
+async def get_menu_item(item_id: str):
+    """Get a single menu item by ID"""
+    item = await menu_service.get_item_by_id(item_id)
+    
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Menu item not found"
+        )
+    
+    return MenuItemResponse(**item)
 
 
 # ========== ADMIN ROUTES ==========

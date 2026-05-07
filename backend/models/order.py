@@ -15,7 +15,7 @@ class PyObjectId(ObjectId):
         yield cls.validate
 
     @classmethod
-    def validate(cls, v):
+    def validate(cls, v, _info=None):
         if not ObjectId.is_valid(v):
             raise ValueError("Invalid objectid")
         return ObjectId(v)
@@ -67,7 +67,7 @@ class Order(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     order_number: str
     user_id: PyObjectId
-    items: List[OrderItem] = []
+    items: List[OrderItem] = Field(default_factory=list)
     subtotal: float = 0.0
     delivery_fee: float = 0.0
     total: float = 0.0

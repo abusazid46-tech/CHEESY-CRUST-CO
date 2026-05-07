@@ -15,7 +15,7 @@ class PyObjectId(ObjectId):
         yield cls.validate
 
     @classmethod
-    def validate(cls, v):
+    def validate(cls, v, _info=None):
         if not ObjectId.is_valid(v):
             raise ValueError("Invalid objectid")
         return ObjectId(v)
@@ -58,7 +58,7 @@ class Reservation(BaseModel):
     time: time
     guests: int
     special_requests: Optional[str] = None
-    preorder_items: List[PreOrderItem] = []
+    preorder_items: List[PreOrderItem] = Field(default_factory=list)
     preorder_total: float = 0.0
     status: ReservationStatus = ReservationStatus.PENDING
     payment_status: PaymentStatus = PaymentStatus.PENDING  # <-- NOW DEFINED

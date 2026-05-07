@@ -1,57 +1,94 @@
 // API Configuration
-const API_BASE_URL = 'https://cheesy-crust-api.onrender.com/api/v1'; // Update with your Render backend URL
+const API_BASE_URL = window.API_BASE_URL || (
+    ['localhost', '127.0.0.1'].includes(window.location.hostname)
+        ? 'http://localhost:8000/api/v1'
+        : 'https://cheesy-crust-api.onrender.com/api/v1'
+);
 
-// API Service Class
+const STORAGE_KEYS = {
+    token: 'auth_token',
+    refreshToken: 'refresh_token',
+    userPhone: 'user_phone',
+    userName: 'user_name',
+    isAdmin: 'is_admin'
+};
+
+function getStoredJson(key, fallback) {
+    try {
+        return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+    } catch {
+        return fallback;
+    }
+}
+
+function normalizeApiError(data, status) {
+    if (Array.isArray(data?.detail)) {
+        return data.detail.map(item => item.msg || JSON.stringify(item)).join(', ');
+    }
+    return data?.detail || data?.message || `Request failed (${status})`;
+}
+
 class ApiService {
     constructor() {
-        this.token = localStorage.getItem('auth_token');
+        this.token = localStorage.getItem(STORAGE_KEYS.token);
     }
 
     setToken(token) {
         this.token = token;
-        localStorage.setItem('auth_token', token);
+        localStorage.setItem(STORAGE_KEYS.token, token);
+    }
+
+    setSession(session) {
+        if (session.access_token) this.setToken(session.access_token);
+        if (session.refresh_token) localStorage.setItem(STORAGE_KEYS.refreshToken, session.refresh_token);
+        if (session.phone) localStorage.setItem(STORAGE_KEYS.userPhone, session.phone);
+        if (session.name) localStorage.setItem(STORAGE_KEYS.userName, session.name);
+        localStorage.setItem(STORAGE_KEYS.isAdmin, String(Boolean(session.is_admin)));
     }
 
     getToken() {
+        this.token = localStorage.getItem(STORAGE_KEYS.token);
         return this.token;
     }
 
     clearToken() {
         this.token = null;
-        localStorage.removeItem('auth_token');
+        Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key));
     }
 
     async request(endpoint, options = {}) {
         const url = `${API_BASE_URL}${endpoint}`;
-        const headers = {
-            'Content-Type': 'application/json',
-            ...options.headers
-        };
+        const headers = { ...(options.headers || {}) };
+        const hasBody = options.body !== undefined && options.body !== null;
 
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
+        if (hasBody && !headers['Content-Type']) {
+            headers['Content-Type'] = 'application/json';
         }
 
+        if (this.getToken()) {
+            headers.Authorization = `Bearer ${this.token}`;
+        }
+
+        let response;
         try {
-            const response = await fetch(url, {
-                ...options,
-                headers
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.detail || 'Request failed');
-            }
-
-            return data;
+            response = await fetch(url, { ...options, headers });
         } catch (error) {
-            console.error('API Error:', error);
-            throw error;
+            throw new Error('Unable to reach the server. Please try again.');
         }
+
+        const text = await response.text();
+        const data = text ? safeJsonParse(text) : null;
+
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                this.clearToken();
+            }
+            throw new Error(normalizeApiError(data, response.status));
+        }
+
+        return data;
     }
 
-    // Auth Endpoints
     async sendOTP(phone) {
         return this.request('/auth/send-otp', {
             method: 'POST',
@@ -64,22 +101,72 @@ class ApiService {
             method: 'POST',
             body: JSON.stringify({ phone, otp })
         });
-        if (response.access_token) {
-            this.setToken(response.access_token);
-        }
+        this.setSession(response);
         return response;
     }
 
-    // Menu Endpoints
-    async getMenu() {
-        return this.request('/menu');
+    async logout() {
+        try {
+            await this.request('/auth/logout', { method: 'POST' });
+        } finally {
+            this.clearToken();
+        }
+    }
+
+    async getProfile() {
+        return this.request('/user/profile');
+    }
+
+    async updateProfile(profileData) {
+        return this.request('/user/profile', {
+            method: 'PUT',
+            body: JSON.stringify(profileData)
+        });
+    }
+
+    async getMenu(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.request(`/menu${query ? `?${query}` : ''}`);
     }
 
     async getMenuByCategory(category) {
-        return this.request(`/menu/category/${category}`);
+        return this.request(`/menu/category/${encodeURIComponent(category)}`);
     }
 
-    // Cart Endpoints
+    async createMenuItem(item) {
+        try {
+            return await this.request('/menu', {
+                method: 'POST',
+                body: JSON.stringify(item)
+            });
+        } catch (error) {
+            if (!isValidationError(error)) throw error;
+            return this.request('/menu', {
+                method: 'POST',
+                body: JSON.stringify({ request: item, payload: {} })
+            });
+        }
+    }
+
+    async updateMenuItem(itemId, item) {
+        try {
+            return await this.request(`/menu/${encodeURIComponent(itemId)}`, {
+                method: 'PUT',
+                body: JSON.stringify(item)
+            });
+        } catch (error) {
+            if (!isValidationError(error)) throw error;
+            return this.request(`/menu/${encodeURIComponent(itemId)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ request: item, payload: {} })
+            });
+        }
+    }
+
+    async deleteMenuItem(itemId) {
+        return this.request(`/menu/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+    }
+
     async getCart() {
         return this.request('/cart');
     }
@@ -92,10 +179,7 @@ class ApiService {
     }
 
     async removeFromCart(itemId) {
-        return this.request('/cart/remove', {
-            method: 'DELETE',
-            body: JSON.stringify({ item_id: itemId })
-        });
+        return this.request(`/cart/remove/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
     }
 
     async updateCartItem(itemId, quantity) {
@@ -105,7 +189,10 @@ class ApiService {
         });
     }
 
-    // Order Endpoints
+    async clearCart() {
+        return this.request('/cart/clear', { method: 'DELETE' });
+    }
+
     async createOrder(orderData) {
         return this.request('/orders/create', {
             method: 'POST',
@@ -117,11 +204,31 @@ class ApiService {
         return this.request('/orders/user');
     }
 
-    // Payment Endpoints
-    async createPaymentOrder(amount, orderId) {
+    async getAllOrders(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.request(`/orders/admin/all${query ? `?${query}` : ''}`);
+    }
+
+    async updateOrderStatus(orderId, status, notes = null) {
+        const payload = { status, notes };
+        try {
+            return await this.request(`/orders/admin/${encodeURIComponent(orderId)}/status`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+        } catch (error) {
+            if (!isValidationError(error)) throw error;
+            return this.request(`/orders/admin/${encodeURIComponent(orderId)}/status`, {
+                method: 'PATCH',
+                body: JSON.stringify({ request: payload, payload: {} })
+            });
+        }
+    }
+
+    async createPaymentOrder(amount, orderId = null, reservationId = null) {
         return this.request('/payment/create-order', {
             method: 'POST',
-            body: JSON.stringify({ amount, order_id: orderId })
+            body: JSON.stringify({ amount, order_id: orderId, reservation_id: reservationId })
         });
     }
 
@@ -131,76 +238,156 @@ class ApiService {
             body: JSON.stringify(paymentData)
         });
     }
-// Profile Endpoints
-async getProfile() {
-    return this.request('/user/profile');
-}
 
-async updateProfile(profileData) {
-    return this.request('/user/profile', {
-        method: 'PUT',
-        body: JSON.stringify(profileData)
-    });
-}
-
-async getUserOrders() {
-    return this.request('/orders/user');
-}
-
-async addReview(orderId, reviewData) {
-    return this.request(`/orders/${orderId}/review`, {
-        method: 'POST',
-        body: JSON.stringify(reviewData)
-    });
-}
-    // Reservation Endpoints
     async createReservation(reservationData) {
         return this.request('/reservation', {
             method: 'POST',
-            body: JSON.stringify(reservationData)
+            body: JSON.stringify(normalizeReservationPayload(reservationData))
         });
     }
 
     async getUserReservations() {
         return this.request('/reservation/user');
     }
-}
 
-// Create and export API instance
-const api = new ApiService();
+    async getAllReservations(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.request(`/reservation/admin/all${query ? `?${query}` : ''}`);
+    }
 
-// Toast notification helper
-function showToast(message, type = 'success') {
-    const toast = document.createElement('div');
-    toast.className = 'toast-message';
-    toast.innerHTML = `<i class="fas fa-${type === 'error' ? 'exclamation-triangle' : 'check-circle'}" style="color: var(--gold); margin-right: 8px;"></i>${message}`;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
-}
+    async updateReservationStatus(reservationId, status) {
+        return this.request(`/reservation/admin/${encodeURIComponent(reservationId)}/status?status=${encodeURIComponent(status)}`, {
+            method: 'PATCH'
+        });
+    }
 
-// Update cart count in navbar
-async function updateCartCount() {
-    try {
-        if (api.getToken()) {
-            const cart = await api.getCart();
-            const count = cart.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
-            document.getElementById('cart-count').innerText = count;
-        }
-    } catch (error) {
-        console.error('Failed to fetch cart count:', error);
+    async getDashboard() {
+        return this.request('/admin/dashboard');
+    }
+
+    async getSalesSummary(period = 'week') {
+        return this.request(`/admin/sales-summary?period=${encodeURIComponent(period)}`);
     }
 }
 
-// Check authentication status
-function isAuthenticated() {
-    return !!api.getToken();
+function safeJsonParse(text) {
+    try {
+        return JSON.parse(text);
+    } catch {
+        return { message: text };
+    }
 }
 
-// Format price to INR
+function isValidationError(error) {
+    return /field required|validation|422/i.test(error.message || '');
+}
+
+function normalizeReservationPayload(reservationData) {
+    const reservation = reservationData.reservation || reservationData;
+    const preorderItems = reservation.preorder_items || reservation.preorderItems || [];
+    return {
+        name: String(reservation.name || '').trim(),
+        phone: String(reservation.phone || '').trim(),
+        date: reservation.date,
+        time: reservation.time,
+        guests: Number(reservation.guests),
+        special_requests: reservation.special_requests || reservation.specialRequests || null,
+        preorder_items: preorderItems.map(item => ({
+            item_id: item.item_id || item.id,
+            name: item.name,
+            price: Number(item.price),
+            quantity: Number(item.quantity || 1)
+        }))
+    };
+}
+
+function normalizeMenuItem(item) {
+    return {
+        id: item._id || item.id,
+        name: item.name,
+        category: item.category,
+        price: Number(item.price || 0),
+        description: item.description || '',
+        img: item.image_url || item.img || 'https://via.placeholder.com/400',
+        image_url: item.image_url || item.img || 'https://via.placeholder.com/400',
+        is_available: item.is_available !== false,
+        rating: item.rating || { avg: 0, count: 0 }
+    };
+}
+
+function normalizeCartItem(item) {
+    return {
+        id: item.item_id || item.id || item._id,
+        item_id: item.item_id || item.id || item._id,
+        name: item.name,
+        price: Number(item.price || 0),
+        quantity: Number(item.quantity || 1),
+        img: item.image_url || item.img || 'https://via.placeholder.com/100',
+        image_url: item.image_url || item.img || 'https://via.placeholder.com/100'
+    };
+}
+
+function localCart() {
+    return getStoredJson('local_cart', []);
+}
+
+function saveLocalCart(items) {
+    localStorage.setItem('local_cart', JSON.stringify(items));
+}
+
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = 'toast-message';
+    const icon = type === 'error' ? 'exclamation-triangle' : type === 'info' ? 'info-circle' : 'check-circle';
+    toast.innerHTML = `<i class="fas fa-${icon}" style="color: var(--gold); margin-right: 8px;"></i>${escapeHtml(message)}`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3500);
+}
+
+function setLoading(element, isLoading, label = 'Working...') {
+    if (!element) return;
+    if (isLoading) {
+        element.dataset.originalHtml = element.innerHTML;
+        element.disabled = true;
+        element.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${label}`;
+    } else {
+        element.disabled = false;
+        if (element.dataset.originalHtml) element.innerHTML = element.dataset.originalHtml;
+    }
+}
+
+function isAuthenticated() {
+    return Boolean(api.getToken());
+}
+
+function logoutUser(redirectTo = 'index.html') {
+    api.clearToken();
+    window.location.href = redirectTo;
+}
+
 function formatPrice(price) {
     return new Intl.NumberFormat('en-IN', {
         style: 'currency',
         currency: 'INR',
         minimumFractionDigits: 0
-    }).format(price).replace('₹', '₹');
+    }).format(Number(price || 0));
 }
+
+function escapeHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, m => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    })[m]);
+}
+
+async function updateCartCount() {
+    const badge = document.getElementById('cart-count');
+    if (!badge) return;
+    const count = localCart().reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    badge.innerText = count;
+}
+
+const api = new ApiService();

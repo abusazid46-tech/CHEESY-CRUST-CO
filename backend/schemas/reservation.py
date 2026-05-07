@@ -23,7 +23,7 @@ class ReservationCreateRequest(BaseModel):
     time: str
     guests: int = Field(..., ge=1, le=20)
     special_requests: Optional[str] = None
-    preorder_items: List[PreOrderItemSchema] = []
+    preorder_items: List[PreOrderItemSchema] = Field(default_factory=list)
     
     @field_validator("time")
     @classmethod
@@ -53,7 +53,7 @@ class ReservationResponse(BaseModel):
     time: str
     guests: int
     special_requests: Optional[str] = None
-    preorder_items: List[dict] = []
+    preorder_items: List[dict] = Field(default_factory=list)
     preorder_total: float
     status: str
     payment_status: str

@@ -14,6 +14,7 @@ class CartItemAdd(BaseModel):
 
 class CartItemUpdate(BaseModel):
     """Update cart item request"""
+    item_id: str
     quantity: int = Field(..., ge=0, le=20)
 
 
@@ -30,7 +31,7 @@ class CartItemResponse(BaseModel):
 class CartResponse(BaseModel):
     """Cart response"""
     id: str = Field(alias="_id")
-    items: List[CartItemResponse] = []
+    items: List[CartItemResponse] = Field(default_factory=list)
     total: float
     item_count: int = 0
     updated_at: str

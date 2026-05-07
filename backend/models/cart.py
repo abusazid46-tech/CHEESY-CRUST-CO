@@ -14,7 +14,7 @@ class PyObjectId(ObjectId):
         yield cls.validate
 
     @classmethod
-    def validate(cls, v):
+    def validate(cls, v, _info=None):
         if not ObjectId.is_valid(v):
             raise ValueError("Invalid objectid")
         return ObjectId(v)
@@ -41,7 +41,7 @@ class Cart(BaseModel):
     """Shopping cart model"""
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     user_id: PyObjectId
-    items: List[CartItem] = []
+    items: List[CartItem] = Field(default_factory=list)
     total: float = 0.0
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     

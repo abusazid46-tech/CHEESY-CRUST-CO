@@ -21,7 +21,14 @@ class Settings(BaseSettings):
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    CORS_ORIGINS: List[str] = ["http://localhost:5500", "https://cheesy-crust-co-7w5c.vercel.app"]
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:5500",
+        "http://localhost:8000",
+        "http://127.0.0.1:5500",
+        "http://127.0.0.1:8000",
+        "https://cheesy-crust-co-7w5c.vercel.app",
+        "https://cheesy-crust-api.onrender.com",
+    ]
     
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

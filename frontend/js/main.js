@@ -1,5 +1,5 @@
 // Full Menu Data with Demo Items
-const FULL_MENU = [
+let FULL_MENU = [
     // Breakfast Items
     { id: "b1", name: "Golden Cheese Croissant", category: "breakfast", price: 320, description: "Flaky layers, four artisan cheeses", img: "https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400" },
     { id: "b2", name: "Sunrise Breakfast Pizza", category: "breakfast", price: 450, description: "Eggs, bacon, mozzarella blend", img: "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=400" },
@@ -58,6 +58,18 @@ let reservationState = {
     specialRequests: "",
     preorderItems: []
 };
+
+async function loadBackendMenu() {
+    try {
+        const response = await api.getMenu({ available_only: true, per_page: 100 });
+        if (Array.isArray(response.items) && response.items.length) {
+            FULL_MENU = response.items.map(normalizeMenuItem);
+        }
+    } catch (error) {
+        showToast(`Using local menu: ${error.message}`, 'info');
+    }
+}
+
 function renderMenuCards(filterCategory = "all") {
     const container = document.getElementById("menu-items-container");
     if (!container) return;
@@ -290,7 +302,7 @@ function attachCartListeners() {
             const price = btn.getAttribute('data-price');
             const img = btn.getAttribute('data-img') || 'https://via.placeholder.com/100';
             
-            let cart = JSON.parse(localStorage.getItem('local_cart') || '[]');
+            let cart = localCart();
             const existing = cart.find(i => i.id === id);
             
             if (existing) {
@@ -299,66 +311,26 @@ function attachCartListeners() {
                 cart.push({ id, name, price: parseFloat(price), img, quantity: 1 });
             }
             
-            localStorage.setItem('local_cart', JSON.stringify(cart));
+            saveLocalCart(cart);
             updateLocalCartCount();
             showToast(`${name} added to cart!`);
+
+            if (isAuthenticated() && /^[a-f\d]{24}$/i.test(id)) {
+                try {
+                    await api.addToCart(id);
+                } catch (error) {
+                    showToast(`Saved locally. Backend cart sync failed: ${error.message}`, 'info');
+                }
+            }
         });
     });
 }
-    // Attach event listeners to Add to Cart buttons
-document.querySelectorAll('.add-to-cart-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-        const id = btn.getAttribute('data-id');
-        const name = btn.getAttribute('data-name');
-        const price = btn.getAttribute('data-price');
-        const img = btn.getAttribute('data-img') || 'https://via.placeholder.com/100';
-        
-        // NO LOGIN CHECK HERE - Direct add to localStorage
-        let cart = JSON.parse(localStorage.getItem('local_cart') || '[]');
-        const existing = cart.find(i => i.id === id);
-        
-        if (existing) {
-            existing.quantity++;
-        } else {
-            cart.push({ 
-                id, 
-                name, 
-                price: parseFloat(price), 
-                img,
-                quantity: 1 
-            });
-        }
-        
-        localStorage.setItem('local_cart', JSON.stringify(cart));
-        updateLocalCartCount();
-        showToast(`${name} added to cart!`);
-        
-        // Optional: Sync with backend if logged in (silent background sync)
-        if (isAuthenticated()) {
-            try {
-                await api.addToCart(id);
-            } catch (error) {
-                console.log('Background sync failed, item saved locally');
-            }
-        }
-    });
-});
-
 // Update local cart count
 function updateLocalCartCount() {
-    const cart = JSON.parse(localStorage.getItem('local_cart') || '[]');
+    const cart = localCart();
     const count = cart.reduce((sum, item) => sum + item.quantity, 0);
-    document.getElementById('cart-count').innerText = count;
-}
-
-// Escape HTML helper
-function escapeHtml(str) {
-    return String(str).replace(/[&<>]/g, function(m) {
-        if (m === '&') return '&amp;';
-        if (m === '<') return '&lt;';
-        if (m === '>') return '&gt;';
-        return m;
-    });
+    const badge = document.getElementById('cart-count');
+    if (badge) badge.innerText = count;
 }
 // Check login status and update UI
 function updateAuthUI() {
@@ -376,9 +348,7 @@ function updateAuthUI() {
 
 // Logout function
 function logout() {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user_phone');
-    localStorage.removeItem('user_name');
+    api.clearToken();
     localStorage.removeItem('local_cart');
     
     updateAuthUI();
@@ -610,12 +580,21 @@ function validateReservation() {
 // Process payment with Razorpay
 async function processPayment() {
     updateSummaryPanel();
+    if (!validateReservation()) return;
+    if (!isAuthenticated()) {
+        showToast("Please sign in before confirming a reservation.", "error");
+        document.getElementById('loginIcon')?.click();
+        return;
+    }
+    const button = document.getElementById("confirmAndPayBtn");
+    setLoading(button, true, "Confirming...");
     
     const totalAmount = reservationState.preorderItems.reduce((sum, i) => sum + (i.price * i.quantity), 0);
     
     if (totalAmount === 0) {
         // No pre-order items, just confirm reservation
         await confirmReservationWithoutPayment();
+        setLoading(button, false);
         return;
     }
     
@@ -627,16 +606,17 @@ async function processPayment() {
         };
         
         const response = await api.createReservation(orderData);
+        const paymentOrder = await api.createPaymentOrder(response.preorder_total || totalAmount, null, response.reservation_id);
         
-        if (response.razorpay_order) {
+        if (paymentOrder.razorpay_order_id) {
             // Open Razorpay checkout
             const options = {
-                key: response.razorpay_key,
-                amount: response.razorpay_order.amount,
+                key: paymentOrder.razorpay_key,
+                amount: paymentOrder.amount,
                 currency: "INR",
                 name: "Cheesy Crust Co.",
                 description: `Table Reservation - ${reservationState.date} ${reservationState.time}`,
-                order_id: response.razorpay_order.id,
+                order_id: paymentOrder.razorpay_order_id,
                 handler: async function(paymentResponse) {
                     try {
                         // Verify payment
@@ -673,7 +653,9 @@ async function processPayment() {
         }
     } catch (error) {
         console.error("Payment error:", error);
-        showToast("Payment failed. Please try again.", "error");
+        showToast(error.message || "Payment failed. Please try again.", "error");
+    } finally {
+        setLoading(button, false);
     }
 }
 
@@ -734,7 +716,7 @@ function switchTab(tabId) {
 function initAuthModal() {
     const authModal = new bootstrap.Modal(document.getElementById('authModal'));
     
-    document.getElementById('userIcon').addEventListener('click', () => {
+    document.getElementById('loginIcon')?.addEventListener('click', () => {
         if (isAuthenticated()) {
             showToast('You are already signed in');
         } else {
@@ -742,29 +724,36 @@ function initAuthModal() {
         }
     });
     
-    document.getElementById('sendOtpBtn').addEventListener('click', async () => {
+    document.getElementById('sendOtpBtn').addEventListener('click', async (event) => {
         const phone = document.getElementById('phoneNumber').value;
         if (!phone || phone.length < 10) {
             document.getElementById('authMessage').innerText = 'Please enter a valid phone number';
             return;
         }
         
+        setLoading(event.currentTarget, true, 'Sending...');
         try {
             await api.sendOTP(phone);
-            document.getElementById('authMessage').innerText = 'OTP sent successfully! (Check console for OTP)';
+            document.getElementById('authMessage').innerText = 'OTP sent successfully. Enter the code sent to your phone.';
             document.getElementById('phoneStep').style.display = 'none';
             document.getElementById('otpStep').style.display = 'block';
         } catch (error) {
-            document.getElementById('authMessage').innerText = 'Failed to send OTP';
+            document.getElementById('authMessage').innerText = error.message || 'Failed to send OTP';
+        } finally {
+            setLoading(event.currentTarget, false);
         }
     });
     
-    document.getElementById('verifyOtpBtn').addEventListener('click', async () => {
+    document.getElementById('verifyOtpBtn').addEventListener('click', async (event) => {
         const phone = document.getElementById('phoneNumber').value;
         const otp = document.getElementById('otpInput').value;
         
+        setLoading(event.currentTarget, true, 'Verifying...');
         try {
-            await api.verifyOTP(phone, otp);
+            const session = await api.verifyOTP(phone, otp);
+            localStorage.setItem('user_phone', session.phone || phone);
+            if (session.name) localStorage.setItem('user_name', session.name);
+            updateAuthUI();
             document.getElementById('otpStep').style.display = 'none';
             document.getElementById('authSuccess').style.display = 'block';
             await updateCartCount();
@@ -778,7 +767,9 @@ function initAuthModal() {
                 document.getElementById('otpInput').value = '';
             }, 1500);
         } catch (error) {
-            document.getElementById('authMessage').innerText = 'Invalid OTP';
+            document.getElementById('authMessage').innerText = error.message || 'Invalid OTP';
+        } finally {
+            setLoading(event.currentTarget, false);
         }
     });
     
@@ -789,8 +780,9 @@ function initAuthModal() {
 }
 
 // Initialize everything
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // Menu
+    await loadBackendMenu();
     renderMenuCards('all');
     
     // Menu filters

@@ -22,7 +22,7 @@ class UserProfileResponse(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     dob: Optional[date] = None
-    addresses: List[AddressSchema] = []
+    addresses: List[AddressSchema] = Field(default_factory=list)
     created_at: datetime
     is_active: bool = True
 

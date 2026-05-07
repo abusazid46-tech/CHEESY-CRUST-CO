@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Dict, Any, Optional
 from datetime import date
 
-from middleware import auth_required, get_current_user, get_current_admin_user
+from middleware import auth_optional, auth_required, get_current_user, get_current_admin_user
 from schemas.reservation import (
     ReservationCreateRequest, ReservationResponse,
     ReservationAvailabilityRequest
@@ -20,7 +20,7 @@ router = APIRouter()
 @router.post("")
 async def create_reservation(
     request: ReservationCreateRequest,
-    payload: Optional[Dict[str, Any]] = Depends(auth_required)
+    payload: Optional[Dict[str, Any]] = Depends(auth_optional)
 ):
     """Create a new table reservation"""
     user = await get_current_user(payload) if payload else None
@@ -54,13 +54,13 @@ async def create_reservation(
 
 @router.get("/availability")
 async def check_availability(
-    date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    reservation_date: str = Query(..., alias="date", description="Date in YYYY-MM-DD format"),
     time: str = Query(..., description="Time in HH:MM format"),
     guests: int = Query(..., ge=1)
 ):
     """Check table availability"""
     try:
-        reservation_date = date.fromisoformat(date)
+        parsed_date = date.fromisoformat(reservation_date)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -68,7 +68,7 @@ async def check_availability(
         )
     
     available, info = await reservation_service.check_availability(
-        reservation_date, time, guests
+        parsed_date, time, guests
     )
     
     return {
@@ -124,23 +124,6 @@ async def get_user_reservations(
     }
 
 
-@router.get("/{reservation_id}")
-async def get_reservation(reservation_id: str):
-    """Get reservation by ID (public)"""
-    reservation = await reservation_service.get_reservation_by_id(reservation_id)
-    
-    if not reservation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Reservation not found"
-        )
-    
-    return {
-        "success": True,
-        "reservation": reservation
-    }
-
-
 @router.get("/lookup/{phone}")
 async def lookup_reservations(phone: str):
     """Look up reservations by phone number"""
@@ -187,12 +170,12 @@ async def get_all_reservations(
 @router.patch("/admin/{reservation_id}/status")
 async def update_reservation_status(
     reservation_id: str,
-    status: str,
+    reservation_status: str = Query(..., alias="status"),
     admin: Dict[str, Any] = Depends(get_current_admin_user)
 ):
     """Update reservation status (admin only)"""
     try:
-        status_enum = ReservationStatus(status)
+        status_enum = ReservationStatus(reservation_status)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -212,5 +195,22 @@ async def update_reservation_status(
     
     return {
         "success": True,
-        "message": f"Reservation status updated to {status}"
+        "message": f"Reservation status updated to {reservation_status}"
+    }
+
+
+@router.get("/{reservation_id}")
+async def get_reservation(reservation_id: str):
+    """Get reservation by ID (public)"""
+    reservation = await reservation_service.get_reservation_by_id(reservation_id)
+    
+    if not reservation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reservation not found"
+        )
+    
+    return {
+        "success": True,
+        "reservation": reservation
     }

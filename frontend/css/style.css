@@ -1,0 +1,38 @@
+:root {
+  --gold: #cda45e;
+  --gold-dark: #b58d4a;
+  --dark-bg: #0c0b09;
+  --card-bg: #1a1814;
+}
+
+body {
+  background: var(--dark-bg);
+  color: #eeeeee;
+  font-family: 'Open Sans', sans-serif;
+}
+
+.btn-gold {
+  background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+  color: #0c0b09;
+  border: 0;
+  border-radius: 40px;
+  font-weight: 600;
+}
+
+.btn-gold:hover {
+  color: #0c0b09;
+  filter: brightness(1.08);
+}
+
+.toast-message {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  background: #1a1814;
+  color: #fff;
+  border-left: 4px solid var(--gold);
+  border-radius: 8px;
+  padding: 12px 18px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}

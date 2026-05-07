@@ -14,7 +14,7 @@ class PyObjectId(ObjectId):
         yield cls.validate
 
     @classmethod
-    def validate(cls, v):
+    def validate(cls, v, _info=None):
         if not ObjectId.is_valid(v):
             raise ValueError("Invalid objectid")
         return ObjectId(v)
@@ -39,7 +39,7 @@ class User(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     dob: Optional[datetime] = None
-    addresses: List[Address] = []
+    addresses: List[Address] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = True

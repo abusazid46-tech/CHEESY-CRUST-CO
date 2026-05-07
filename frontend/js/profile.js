@@ -1,217 +1,168 @@
-// Self-contained auth check
-const authToken = localStorage.getItem('auth_token');
-if (!authToken) {
-    window.location.href = 'index.html';
-}
-
-// Define local isAuthenticated
-function isAuthenticated() {
-    return !!localStorage.getItem('auth_token');
-}
-// Check authentication
 if (!isAuthenticated()) {
     window.location.href = 'index.html';
 }
 
-// Load user profile
-async function loadProfile() {
-    const phone = localStorage.getItem('user_phone') || 'Customer';
-    const name = localStorage.getItem('user_name') || 'Customer';
-    
-    document.getElementById('profileName').innerText = name;
-    document.getElementById('profilePhone').innerHTML = `<i class="fas fa-phone-alt gold-icon"></i> ${phone}`;
-    document.getElementById('profileInitials').innerText = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-    document.getElementById('editName').value = name;
-    document.getElementById('editPhone').value = phone;
-    
-    // Load from localStorage
-    const profile = JSON.parse(localStorage.getItem('user_profile') || '{}');
-    if (profile.email) document.getElementById('editEmail').value = profile.email;
-    if (profile.dob) document.getElementById('editDob').value = profile.dob;
-}
+let currentProfile = null;
 
-// Save profile
-document.getElementById('profileForm')?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    
-    const profile = {
-        name: document.getElementById('editName').value,
-        email: document.getElementById('editEmail').value,
-        dob: document.getElementById('editDob').value
-    };
-    
-    localStorage.setItem('user_profile', JSON.stringify(profile));
-    localStorage.setItem('user_name', profile.name);
-    
-    document.getElementById('profileName').innerText = profile.name;
-    document.getElementById('profileInitials').innerText = profile.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-    
-    showToast('Profile updated successfully!');
+document.addEventListener('DOMContentLoaded', () => {
+    loadProfile();
+    document.getElementById('profileForm')?.addEventListener('submit', saveProfile);
+    document.getElementById('addAddressBtn')?.addEventListener('click', addAddress);
+    document.getElementById('logoutBtn')?.addEventListener('click', event => {
+        event.preventDefault();
+        logoutUser('index.html');
+    });
+
+    document.querySelectorAll('.profile-tab').forEach(tab => {
+        tab.addEventListener('click', () => switchProfileTab(tab.getAttribute('data-tab')));
+    });
 });
 
-// Load order history
-function loadOrderHistory() {
-    const orders = JSON.parse(localStorage.getItem('cheesy_orders') || '[]');
-    const container = document.getElementById('orderHistoryContainer');
-    
-    if (orders.length === 0) {
-        container.innerHTML = '<p class="text-muted text-center py-4">No orders yet. <a href="index.html#menu">Order now!</a></p>';
-        return;
+async function loadProfile() {
+    try {
+        currentProfile = await api.getProfile();
+        localStorage.setItem(STORAGE_KEYS.userPhone, currentProfile.phone || '');
+        if (currentProfile.name) localStorage.setItem(STORAGE_KEYS.userName, currentProfile.name);
+        renderProfile(currentProfile);
+    } catch (error) {
+        showToast(error.message, 'error');
+        if (!isAuthenticated()) window.location.href = 'index.html';
     }
-    
-    let html = '';
-    orders.reverse().forEach(order => {
-        const statusClass = order.status === 'confirmed' ? 'status-pending' : 'status-delivered';
-        html += `
-            <div class="order-history-item">
-                <div class="d-flex justify-content-between align-items-start mb-3">
-                    <div>
-                        <h6>Order #${order.id}</h6>
-                        <small>${new Date(order.timestamp).toLocaleDateString()}</small>
-                    </div>
-                    <span class="status-badge ${statusClass}">${order.status}</span>
-                </div>
-                <div>
-                    ${order.items.map(item => `
-                        <div class="d-flex justify-content-between">
-                            <span>${item.quantity}x ${item.name}</span>
-                            <span>₹${item.price * item.quantity}</span>
-                        </div>
-                    `).join('')}
-                </div>
-                <hr style="border-color: #3a352e;">
-                <div class="d-flex justify-content-between">
-                    <strong>Total</strong>
-                    <strong style="color: var(--gold);">₹${order.total}</strong>
-                </div>
-                <div class="mt-2">
-                    <small><i class="fas fa-${order.order_type === 'delivery' ? 'motorcycle' : 'shopping-bag'} gold-icon"></i> ${order.order_type}</small>
-                </div>
-            </div>
-        `;
-    });
-    
-    container.innerHTML = html;
 }
 
-// Load saved addresses
+function renderProfile(profile) {
+    const name = profile.name || 'Customer';
+    document.getElementById('profileName').innerText = name;
+    document.getElementById('profilePhone').innerHTML = `<i class="fas fa-phone-alt gold-icon"></i> ${escapeHtml(profile.phone || '')}`;
+    document.getElementById('profileInitials').innerText = initials(name);
+    document.getElementById('editName').value = profile.name || '';
+    document.getElementById('editPhone').value = profile.phone || '';
+    document.getElementById('editEmail').value = profile.email || '';
+    document.getElementById('editDob').value = profile.dob || '';
+
+    if (profile.created_at) {
+        document.getElementById('profileMemberSince').innerHTML =
+            `<i class="fas fa-calendar-alt gold-icon"></i> Member since ${new Date(profile.created_at).getFullYear()}`;
+    }
+}
+
+async function saveProfile(event) {
+    event.preventDefault();
+    const button = event.submitter;
+    const profile = {
+        name: document.getElementById('editName').value.trim() || null,
+        email: document.getElementById('editEmail').value.trim() || null,
+        dob: document.getElementById('editDob').value || null
+    };
+
+    setLoading(button, true, 'Saving...');
+    try {
+        const response = await api.updateProfile(profile);
+        currentProfile = response.user || { ...currentProfile, ...profile };
+        if (currentProfile.name) localStorage.setItem(STORAGE_KEYS.userName, currentProfile.name);
+        renderProfile(currentProfile);
+        showToast('Profile updated successfully.');
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        setLoading(button, false);
+    }
+}
+
+function switchProfileTab(tabId) {
+    document.querySelectorAll('.profile-tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.profile-tab[data-tab="${tabId}"]`)?.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+    document.getElementById(`tab-${tabId}`).style.display = 'block';
+
+    if (tabId === 'orders') loadOrderHistory();
+    if (tabId === 'addresses') loadAddresses();
+    if (tabId === 'reviews') loadMyReviews();
+}
+
+async function loadOrderHistory() {
+    const container = document.getElementById('orderHistoryContainer');
+    container.innerHTML = '<p class="text-muted text-center py-4">Loading orders...</p>';
+    try {
+        const response = await api.getUserOrders();
+        const orders = response.orders || [];
+        if (!orders.length) {
+            container.innerHTML = '<p class="text-muted text-center py-4">No orders yet. <a href="index.html#menu">Order now!</a></p>';
+            return;
+        }
+        container.innerHTML = orders.map(renderOrder).join('');
+    } catch (error) {
+        container.innerHTML = `<p class="text-danger text-center py-4">${escapeHtml(error.message)}</p>`;
+    }
+}
+
+function renderOrder(order) {
+    const orderId = order.order_number || order._id || order.id;
+    const status = order.status || 'pending';
+    return `
+        <div class="order-history-item">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h6>Order #${escapeHtml(orderId)}</h6>
+                    <small>${order.created_at ? new Date(order.created_at).toLocaleDateString() : ''}</small>
+                </div>
+                <span class="status-badge status-${escapeHtml(status)}">${escapeHtml(status)}</span>
+            </div>
+            <div>
+                ${(order.items || []).map(item => `
+                    <div class="d-flex justify-content-between">
+                        <span>${Number(item.quantity || 1)}x ${escapeHtml(item.name)}</span>
+                        <span>${formatPrice(Number(item.price || 0) * Number(item.quantity || 1))}</span>
+                    </div>
+                `).join('')}
+            </div>
+            <hr style="border-color: #3a352e;">
+            <div class="d-flex justify-content-between">
+                <strong>Total</strong>
+                <strong style="color: var(--gold);">${formatPrice(order.total)}</strong>
+            </div>
+        </div>
+    `;
+}
+
 function loadAddresses() {
-    const addresses = JSON.parse(localStorage.getItem('saved_addresses') || '[]');
+    const addresses = currentProfile?.addresses || [];
     const container = document.getElementById('savedAddressesContainer');
-    
-    if (addresses.length === 0) {
+    if (!addresses.length) {
         container.innerHTML = '<p class="text-muted">No saved addresses yet.</p>';
         return;
     }
-    
-    let html = '';
-    addresses.forEach((addr, index) => {
-        html += `
-            <div class="address-item" style="background: var(--card-light); padding: 1rem; border-radius: 12px; margin-bottom: 1rem;">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <strong>${addr.label || 'Address ' + (index + 1)}</strong>
-                        <p class="mb-1 mt-2">${addr.full}</p>
-                    </div>
-                    <button class="btn-sm" onclick="deleteAddress(${index})" style="background:none; border:none; color:#dc3545;">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            </div>
-        `;
-    });
-    
-    container.innerHTML = html;
+    container.innerHTML = addresses.map(addr => `
+        <div class="address-item" style="background: var(--card-light); padding: 1rem; border-radius: 12px; margin-bottom: 1rem;">
+            <strong>${escapeHtml(addr.label || 'Address')}</strong>
+            <p class="mb-1 mt-2">${escapeHtml(addr.full)}</p>
+        </div>
+    `).join('');
 }
 
-// Add address
-document.getElementById('addAddressBtn')?.addEventListener('click', () => {
-    const address = prompt('Enter your address:');
-    if (address) {
-        const addresses = JSON.parse(localStorage.getItem('saved_addresses') || '[]');
-        addresses.push({ full: address, label: 'Home' });
-        localStorage.setItem('saved_addresses', JSON.stringify(addresses));
-        loadAddresses();
-        showToast('Address saved!');
-    }
-});
-
-// Delete address
-function deleteAddress(index) {
-    const addresses = JSON.parse(localStorage.getItem('saved_addresses') || '[]');
-    addresses.splice(index, 1);
-    localStorage.setItem('saved_addresses', JSON.stringify(addresses));
-    loadAddresses();
-    showToast('Address removed');
+function addAddress() {
+    showToast('Address management is not exposed by this profile form yet.', 'info');
 }
 
-// Load reviews
 function loadMyReviews() {
-    const reviews = JSON.parse(localStorage.getItem('user_reviews') || '[]');
+    const reviews = getStoredJson('user_reviews', []);
     const container = document.getElementById('myReviewsContainer');
-    
-    if (reviews.length === 0) {
+    if (!reviews.length) {
         container.innerHTML = '<p class="text-muted text-center py-4">No reviews yet.</p>';
         return;
     }
-    
-    let html = '';
-    reviews.reverse().forEach(review => {
-        html += `
-            <div style="background: var(--card-light); padding: 1rem; border-radius: 12px; margin-bottom: 1rem;">
-                <div class="d-flex justify-content-between">
-                    <strong>${review.itemName}</strong>
-                    <span style="color: var(--gold);">
-                        ${'★'.repeat(review.rating)}${'☆'.repeat(5-review.rating)}
-                    </span>
-                </div>
-                <p class="mt-2 mb-0">${review.comment}</p>
-                <small class="text-muted">${new Date(review.date).toLocaleDateString()}</small>
+    container.innerHTML = reviews.map(review => `
+        <div style="background: var(--card-light); padding: 1rem; border-radius: 12px; margin-bottom: 1rem;">
+            <div class="d-flex justify-content-between">
+                <strong>${escapeHtml(review.itemName)}</strong>
+                <span style="color: var(--gold);">${'★'.repeat(review.rating)}${'☆'.repeat(5 - review.rating)}</span>
             </div>
-        `;
-    });
-    
-    container.innerHTML = html;
+            <p class="mt-2 mb-0">${escapeHtml(review.comment)}</p>
+            <small class="text-muted">${new Date(review.date).toLocaleDateString()}</small>
+        </div>
+    `).join('');
 }
-// Logout functionality
-document.getElementById('logoutBtn')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user_phone');
-    localStorage.removeItem('user_name');
-    window.location.href = 'index.html';
-});
-// Tab switching
-document.querySelectorAll('.profile-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        document.querySelectorAll('.profile-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        
-        const tabId = tab.getAttribute('data-tab');
-        document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-        document.getElementById(`tab-${tabId}`).style.display = 'block';
-        
-        if (tabId === 'orders') loadOrderHistory();
-        if (tabId === 'addresses') loadAddresses();
-        if (tabId === 'reviews') loadMyReviews();
-    });
-});
-document.addEventListener('DOMContentLoaded', () => {
-    loadProfile();
-    
-    // Wait for cart.js to load and check pending reviews
-    setTimeout(() => {
-        if (typeof checkPendingReviews === 'function') {
-            checkPendingReviews();
-        }
-    }, 1000);
-});
-// Toast helper
-function showToast(message) {
-    const toast = document.createElement('div');
-    toast.className = 'toast-message';
-    toast.innerHTML = `<i class="fas fa-check-circle" style="color: var(--gold);"></i> ${message}`;
-    toast.style.cssText = 'position:fixed; bottom:20px; right:20px; background:#1a1814; border-left:4px solid #cda45e; padding:12px 20px; border-radius:8px; z-index:9999;';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+
+function initials(name) {
+    return String(name || 'Customer').split(' ').map(part => part[0]).join('').toUpperCase().slice(0, 2);
 }

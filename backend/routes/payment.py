@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, status, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
 
-from middleware import auth_required, get_current_user
+from middleware import auth_optional, auth_required, get_current_user
 from schemas.payment import (
     CreateOrderRequest, CreateOrderResponse,
     VerifyPaymentRequest
@@ -19,23 +19,18 @@ router = APIRouter()
 @router.post("/create-order")
 async def create_payment_order(
     request: CreateOrderRequest,
-    payload: Dict[str, Any] = Depends(auth_required)
+    payload: Dict[str, Any] = Depends(auth_optional)
 ):
     """Create Razorpay order for payment"""
-    user = await get_current_user(payload)
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+    user = await get_current_user(payload) if payload else None
     
     # Add user info to notes
     notes = request.notes or {}
-    notes.update({
-        "user_id": user["_id"],
-        "user_phone": user["phone"]
-    })
+    if user:
+        notes.update({
+            "user_id": user["_id"],
+            "user_phone": user["phone"]
+        })
     
     success, result = await payment_service.create_order(
         amount=request.amount,
@@ -56,7 +51,7 @@ async def create_payment_order(
 @router.post("/verify")
 async def verify_payment(
     request: VerifyPaymentRequest,
-    payload: Dict[str, Any] = Depends(auth_required)
+    payload: Dict[str, Any] = Depends(auth_optional)
 ):
     """Verify Razorpay payment signature"""
     success, message = await payment_service.process_payment_success(

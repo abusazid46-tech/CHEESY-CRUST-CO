@@ -2,7 +2,7 @@
 Authentication middleware for JWT validation
 """
 
-from fastapi import Request, HTTPException, status
+from fastapi import Depends, Request, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
 from bson import ObjectId
@@ -62,7 +62,13 @@ async def get_current_user(payload: Dict[str, Any] = None):
         return None
 
 
-async def get_current_admin_user(payload: Dict[str, Any] = None):
+# Global auth dependency
+auth_required = JWTBearer()
+admin_required = JWTBearer()
+auth_optional = JWTBearer(auto_error=False)
+
+
+async def get_current_admin_user(payload: Dict[str, Any] = Depends(admin_required)):
     """Dependency to ensure user is admin"""
     user = await get_current_user(payload)
     if not user or not user.get("is_admin", False):
@@ -71,8 +77,3 @@ async def get_current_admin_user(payload: Dict[str, Any] = None):
             detail="Admin access required"
         )
     return user
-
-
-# Global auth dependency
-auth_required = JWTBearer()
-admin_required = JWTBearer()

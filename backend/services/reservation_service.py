@@ -105,8 +105,12 @@ class ReservationService:
         )
         
         try:
+            reservation_doc = reservation.model_dump(by_alias=True)
+            reservation_doc["date"] = reservation_date.isoformat()
+            reservation_doc["time"] = reservation_time
+            
             result = await collections.reservations.insert_one(
-                reservation.model_dump(by_alias=True)
+                reservation_doc
             )
             reservation.id = result.inserted_id
             return True, reservation, "Reservation created successfully"

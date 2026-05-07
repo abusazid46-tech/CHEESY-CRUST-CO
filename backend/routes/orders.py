@@ -82,41 +82,6 @@ async def get_user_orders(
     }
 
 
-@router.get("/{order_id}")
-async def get_order(
-    order_id: str,
-    payload: Dict[str, Any] = Depends(auth_required)
-):
-    """Get order by ID"""
-    user = await get_current_user(payload)
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    order = await order_service.get_order_by_id(order_id)
-    
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found"
-        )
-    
-    # Check if user owns the order (unless admin)
-    if str(order["user_id"]) != user["_id"] and not user.get("is_admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
-    
-    return {
-        "success": True,
-        "order": order
-    }
-
-
 @router.get("/track/{order_number}")
 async def track_order(order_number: str):
     """Track order by order number (public)"""
@@ -190,5 +155,40 @@ async def update_order_status(
     return {
         "success": True,
         "message": f"Order status updated to {request.status}",
+        "order": order
+    }
+
+
+@router.get("/{order_id}")
+async def get_order(
+    order_id: str,
+    payload: Dict[str, Any] = Depends(auth_required)
+):
+    """Get order by ID"""
+    user = await get_current_user(payload)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    order = await order_service.get_order_by_id(order_id)
+    
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+    
+    # Check if user owns the order (unless admin)
+    if str(order["user_id"]) != user["_id"] and not user.get("is_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+    
+    return {
+        "success": True,
         "order": order
     }

@@ -50,7 +50,7 @@ class MenuItemResponse(BaseModel):
     image_url: str
     is_available: bool
     is_veg: bool
-    rating: dict = {"avg": 0, "count": 0}
+    rating: dict = Field(default_factory=lambda: {"avg": 0, "count": 0})
     created_at: datetime
     updated_at: datetime
     
@@ -62,4 +62,4 @@ class MenuListResponse(BaseModel):
     """Menu list response"""
     items: List[MenuItemResponse]
     total: int
-    categories: List[str] = []
+    categories: List[str] = Field(default_factory=list)
