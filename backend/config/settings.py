@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     API_PREFIX: str = "/api/v1"
     DEV_AUTH_BYPASS: bool = False
+    
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
@@ -84,11 +85,12 @@ class Settings(BaseSettings):
     RESERVATION_SLOT_INTERVAL_MINUTES: int = 30
     RESERVATION_ADVANCE_DAYS: int = 30
     
-
- # Admin Authentication
-ADMIN_EMAIL: str = "admin@cheesycrust.co"
-ADMIN_PASSWORD: str = "Admin@123456"
-ADMIN_JWT_SECRET: str = Field(default="admin_secret_key_change_in_production", env="ADMIN_JWT_SECRET")
+    # Admin Authentication
+    ADMIN_EMAIL: str = "admin@cheesycrust.co"
+    ADMIN_PASSWORD: str = "Admin@123456"
+    ADMIN_JWT_SECRET: str = Field(default="admin_secret_key_change_in_production", env="ADMIN_JWT_SECRET")
+    ADMIN_PHONE_NUMBERS: List[str] = ["+917002012345"]
+    
     @field_validator("ADMIN_PHONE_NUMBERS", mode="before")
     @classmethod
     def parse_admin_phones(cls, v):
