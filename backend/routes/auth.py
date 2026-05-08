@@ -1,7 +1,7 @@
 """
 Authentication routes - OTP and JWT
 """
-
+from config.settings import settings
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 
@@ -17,7 +17,13 @@ router = APIRouter()
 
 @router.post("/send-otp", response_model=SendOTPResponse)
 async def send_otp(request: SendOTPRequest):
-    """Send OTP to phone number"""
+  if settings.DEV_AUTH_BYPASS:
+        return SendOTPResponse(
+            success=True,
+            message="OTP bypass enabled",
+            phone=request.phone,
+            expires_in=300
+        )
     success, message, otp = await auth_service.send_otp(request.phone)
     
     if not success:
@@ -39,6 +45,16 @@ async def send_otp(request: SendOTPRequest):
 
 @router.post("/verify-otp", response_model=TokenResponse)
 async def verify_otp(request: VerifyOTPRequest):
+        if settings.DEV_AUTH_BYPASS:
+        return TokenResponse(
+            access_token="dev-access-token",
+            refresh_token="dev-refresh-token",
+            token_type="bearer",
+            expires_in=3600,
+            user={
+                "phone": request.phone
+            }
+        )
     """Verify OTP and return JWT tokens"""
     success, message, tokens = await auth_service.verify_otp(request.phone, request.otp)
     
