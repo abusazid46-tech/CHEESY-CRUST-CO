@@ -6,6 +6,7 @@ Main application entry point
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from routes.admin_auth import router as admin_auth_router
 import logging
 
 from config.settings import settings
@@ -71,7 +72,7 @@ app.include_router(order_router, prefix=f"{settings.API_PREFIX}/orders", tags=["
 app.include_router(payment_router, prefix=f"{settings.API_PREFIX}/payment", tags=["Payment"])
 app.include_router(reservation_router, prefix=f"{settings.API_PREFIX}/reservation", tags=["Reservation"])
 app.include_router(admin_router, prefix=f"{settings.API_PREFIX}/admin", tags=["Admin"])
-
+app.include_router(admin_auth_router, prefix=f"{settings.API_PREFIX}", tags=["Admin Auth"])
 
 @app.get("/")
 async def root():
