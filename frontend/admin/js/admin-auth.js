@@ -72,7 +72,6 @@ document.getElementById('verifyOtpBtn').addEventListener('click', async () => {
     }
     
     document.getElementById('verifyOtpBtn').disabled = true;
-    document.getElementById('verifyOtpBtn').innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Verifying...';
     
     try {
         const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
@@ -82,24 +81,25 @@ document.getElementById('verifyOtpBtn').addEventListener('click', async () => {
         });
         
         const data = await response.json();
+        console.log('Verify Response:', data);  // Debug line
         
-        if (data.access_token) {
-            // Check if user is admin
-            if (data.is_admin) {
-                localStorage.setItem('admin_token', data.access_token);
-                localStorage.setItem('admin_data', JSON.stringify(data));
-                localStorage.setItem('admin_phone', phone);
-                
-                showMessage('Login successful! Redirecting...', 'success');
-                setTimeout(() => {
-                    window.location.href = 'dashboard.html';
-                }, 1000);
-            } else {
-                showMessage('Access denied. Admin privileges required.', 'error');
-                // Clear any stored tokens
-                localStorage.removeItem('admin_token');
-                localStorage.removeItem('admin_data');
-            }
+        // CHECK BOTH POSSIBLE RESPONSE FORMATS
+        const token = data.access_token || data.token;
+        const isAdmin = data.is_admin || data.user?.is_admin || false;
+        
+        if (token && isAdmin) {
+            localStorage.setItem('admin_token', token);
+            localStorage.setItem('admin_data', JSON.stringify(data));
+            localStorage.setItem('admin_phone', phone);
+            
+            showMessage('Login successful! Redirecting...', 'success');
+            setTimeout(() => {
+                window.location.href = 'dashboard.html';
+            }, 1000);
+        } else if (token && !isAdmin) {
+            showMessage('Access denied. Admin privileges required.', 'error');
+            localStorage.removeItem('admin_token');
+            localStorage.removeItem('admin_data');
         } else {
             showMessage('Invalid OTP. Please try again.', 'error');
         }
@@ -107,7 +107,6 @@ document.getElementById('verifyOtpBtn').addEventListener('click', async () => {
         showMessage('Network error. Please try again.', 'error');
     } finally {
         document.getElementById('verifyOtpBtn').disabled = false;
-        document.getElementById('verifyOtpBtn').innerHTML = '<i class="fas fa-check-circle me-2"></i>Verify & Login';
     }
 });
 
