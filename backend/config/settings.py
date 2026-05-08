@@ -84,8 +84,11 @@ class Settings(BaseSettings):
     RESERVATION_SLOT_INTERVAL_MINUTES: int = 30
     RESERVATION_ADVANCE_DAYS: int = 30
     
-    # Admin Settings
-    ADMIN_PHONE_NUMBERS: List[str] = ["+917002012345"]
+
+ # Admin Authentication
+ADMIN_EMAIL: str = "admin@cheesycrust.co"
+ADMIN_PASSWORD: str = "Admin@123456"
+ADMIN_JWT_SECRET: str = Field(default="admin_secret_key_change_in_production", env="ADMIN_JWT_SECRET")
     
     @field_validator("ADMIN_PHONE_NUMBERS", mode="before")
     @classmethod
