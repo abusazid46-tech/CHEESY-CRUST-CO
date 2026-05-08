@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
     API_PREFIX: str = "/api/v1"
-    
+    DEV_AUTH_BYPASS: bool = False
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
