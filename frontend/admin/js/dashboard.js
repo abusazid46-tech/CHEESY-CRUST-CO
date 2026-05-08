@@ -97,3 +97,24 @@ function renderRecentOrders(orders) {
         tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No orders yet</td></tr>';
         return;
     }
+    
+    tbody.innerHTML = orders.map(order => `
+        <tr>
+            <td><a href="orders.html?id=${order._id}" style="color: var(--gold);">#${order.order_number}</a></td>
+            <td>${order.user_phone || 'N/A'}</td>
+            <td>${order.items?.length || 0} items</td>
+            <td>${formatCurrency(order.total)}</td>
+            <td><span class="badge-status badge-${order.status}">${order.status}</span></td>
+            <td>${formatDate(order.created_at)}</td>
+        </tr>
+    `).join('');
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadDashboard();
+    loadSalesChart();
+    
+    // Refresh every 60 seconds
+    setInterval(loadDashboard, 60000);
+});
