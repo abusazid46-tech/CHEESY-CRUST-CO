@@ -42,7 +42,20 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
     await close_mongo_connection()
     logger.info("Disconnected from MongoDB")
-
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting Cheesy Crust Co. API...")
+    await connect_to_mongo()
+    
+    # Initialize default admin
+    from services.admin_service import admin_service
+    await admin_service.initialize_default_admin()
+    
+    logger.info("Connected to MongoDB")
+    yield
+    # Shutdown
+    await close_mongo_connection()
 
 # Create FastAPI app
 app = FastAPI(
