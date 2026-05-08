@@ -1,12 +1,12 @@
-// Admin Authentication
+// Admin Authentication - Email/Password JWT Based
 const API_BASE_URL = 'https://cheesy-crust-api.onrender.com/api/v1';
 
-// Check if already logged in as admin
+// Check if already logged in
 function checkAdminAuth() {
     const token = localStorage.getItem('admin_token');
     const adminData = JSON.parse(localStorage.getItem('admin_data') || '{}');
     
-    if (token && adminData.is_admin) {
+    if (token && adminData.email) {
         window.location.href = 'dashboard.html';
         return;
     }
@@ -25,95 +25,79 @@ function showMessage(message, type = 'info') {
     box.innerHTML = `<span style="color: ${colors[type]};">${message}</span>`;
 }
 
-// Send OTP
-document.getElementById('sendOtpBtn').addEventListener('click', async () => {
-    const phone = document.getElementById('adminPhone').value.trim();
+// Toggle password visibility
+document.getElementById('togglePassword').addEventListener('click', function() {
+    const passwordInput = document.getElementById('adminPassword');
+    const icon = this.querySelector('i');
     
-    if (!phone || phone.length < 10) {
-        showMessage('Please enter a valid phone number', 'error');
-        return;
-    }
-    
-    document.getElementById('sendOtpBtn').disabled = true;
-    document.getElementById('sendOtpBtn').innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Sending...';
-    
-    try {
-        const response = await fetch(`${API_BASE_URL}/auth/send-otp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            document.getElementById('loginStep').style.display = 'none';
-            document.getElementById('otpStep').style.display = 'block';
-            showMessage('OTP sent successfully! Check your phone.', 'success');
-        } else {
-            showMessage(data.detail || 'Failed to send OTP', 'error');
-        }
-    } catch (error) {
-        showMessage('Network error. Please try again.', 'error');
-    } finally {
-        document.getElementById('sendOtpBtn').disabled = false;
-        document.getElementById('sendOtpBtn').innerHTML = '<i class="fas fa-paper-plane me-2"></i>Send OTP';
+    if (passwordInput.type === 'password') {
+        passwordInput.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+    } else {
+        passwordInput.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
     }
 });
 
-// Verify OTP
-document.getElementById('verifyOtpBtn').addEventListener('click', async () => {
-    const phone = document.getElementById('adminPhone').value.trim();
-    const otp = document.getElementById('otpInput').value.trim();
+// Handle login
+document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
     
-    if (!otp || otp.length < 6) {
-        showMessage('Please enter a valid OTP', 'error');
+    const email = document.getElementById('adminEmail').value.trim();
+    const password = document.getElementById('adminPassword').value;
+    const rememberMe = document.getElementById('rememberMe').checked;
+    
+    if (!email || !password) {
+        showMessage('Please fill in all fields', 'error');
         return;
     }
     
-    document.getElementById('verifyOtpBtn').disabled = true;
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Signing in...';
     
     try {
-        const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+        const response = await fetch(`${API_BASE_URL}/admin/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone, otp })
+            body: JSON.stringify({ email, password })
         });
         
         const data = await response.json();
-        console.log('Verify Response:', data);  // Debug line
+        console.log('Login Response:', data);
         
-        // CHECK BOTH POSSIBLE RESPONSE FORMATS
-        const token = data.access_token || data.token;
-        const isAdmin = data.is_admin || data.user?.is_admin || false;
-        
-        if (token && isAdmin) {
-            localStorage.setItem('admin_token', token);
-            localStorage.setItem('admin_data', JSON.stringify(data));
-            localStorage.setItem('admin_phone', phone);
+        if (data.success && data.access_token) {
+            // Store admin tokens
+            localStorage.setItem('admin_token', data.access_token);
+            localStorage.setItem('admin_refresh_token', data.refresh_token);
+            localStorage.setItem('admin_data', JSON.stringify(data.admin));
+            
+            if (rememberMe) {
+                localStorage.setItem('admin_email_remembered', email);
+            }
             
             showMessage('Login successful! Redirecting...', 'success');
+            
             setTimeout(() => {
                 window.location.href = 'dashboard.html';
             }, 1000);
-        } else if (token && !isAdmin) {
-            showMessage('Access denied. Admin privileges required.', 'error');
-            localStorage.removeItem('admin_token');
-            localStorage.removeItem('admin_data');
         } else {
-            showMessage('Invalid OTP. Please try again.', 'error');
+            showMessage(data.detail || 'Invalid email or password', 'error');
         }
     } catch (error) {
-        showMessage('Network error. Please try again.', 'error');
+        console.error('Login error:', error);
+        showMessage('Network error. Please check your connection.', 'error');
     } finally {
-        document.getElementById('verifyOtpBtn').disabled = false;
+        loginBtn.disabled = false;
+        loginBtn.innerHTML = '<i class="fas fa-sign-in-alt me-2"></i>Sign In';
     }
 });
 
-// Back button
-document.getElementById('backToPhoneBtn').addEventListener('click', () => {
-    document.getElementById('loginStep').style.display = 'block';
-    document.getElementById('otpStep').style.display = 'none';
-    document.getElementById('otpInput').value = '';
-    showMessage('', 'info');
-});
+// Load remembered email
+const rememberedEmail = localStorage.getItem('admin_email_remembered');
+if (rememberedEmail) {
+    document.getElementById('adminEmail').value = rememberedEmail;
+    document.getElementById('rememberMe').checked = true;
+}
