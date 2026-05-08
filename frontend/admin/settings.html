@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings - Admin Panel</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+
+<div class="admin-layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <img src="https://i.ibb.co/1JQyJGfH/logo.png" alt="Logo">
+      <h4>Cheesy Crust Co.</h4>
+      <p>Admin Panel</p>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="dashboard.html"><i class="fas fa-th-large"></i> Dashboard</a>
+      <a href="orders.html"><i class="fas fa-receipt"></i> Orders</a>
+      <a href="menu-management.html"><i class="fas fa-utensils"></i> Menu Management</a>
+      <a href="reservations.html"><i class="fas fa-calendar-check"></i> Reservations</a>
+      <a href="customers.html"><i class="fas fa-users"></i> Customers</a>
+      <a href="reviews.html"><i class="fas fa-star"></i> Reviews</a>
+      <a href="offers-promos.html"><i class="fas fa-tags"></i> Offers & Promos</a>
+      <a href="analytics.html"><i class="fas fa-chart-bar"></i> Analytics</a>
+      <a href="settings.html" class="active"><i class="fas fa-cog"></i> Settings</a>
+    </nav>
+    <div class="p-3">
+      <button class="btn-outline w-100" onclick="adminLogout()" style="border-color: #dc3545; color: #dc3545;">
+        <i class="fas fa-sign-out-alt me-2"></i> Logout
+      </button>
+    </div>
+  </aside>
+  
+  <div class="main-content">
+    <header class="admin-header">
+      <h5><i class="fas fa-cog me-2" style="color: var(--gold);"></i>Admin Settings</h5>
+    </header>
+    
+    <div class="content-area">
+      <div class="row g-4">
+        <!-- Restaurant Settings -->
+        <div class="col-md-6">
+          <div class="chart-container">
+            <h6 style="color: var(--gold);"><i class="fas fa-store me-2"></i>Restaurant Settings</h6>
+            <form class="admin-form" id="restaurantSettingsForm">
+              <div class="mb-3">
+                <label>Restaurant Name</label>
+                <input type="text" class="form-control" id="restaurantName" value="Cheesy Crust Co.">
+              </div>
+              <div class="mb-3">
+                <label>Phone</label>
+                <input type="tel" class="form-control" id="restaurantPhone" value="+917002012345">
+              </div>
+              <div class="mb-3">
+                <label>Email</label>
+                <input type="email" class="form-control" id="restaurantEmail" value="dine@cheesycrust.co">
+              </div>
+              <div class="mb-3">
+                <label>Address</label>
+                <textarea class="form-control" id="restaurantAddress" rows="2">Rangirkhari Main Road, Near SBI, Silchar, Assam - 788005</textarea>
+              </div>
+            </form>
+          </div>
+        </div>
+        
+        <!-- Business Settings -->
+        <div class="col-md-6">
+          <div class="chart-container">
+            <h6 style="color: var(--gold);"><i class="fas fa-chart-line me-2"></i>Business Settings</h6>
+            <form class="admin-form" id="businessSettingsForm">
+              <div class="mb-3">
+                <label>Delivery Fee (₹)</label>
+                <input type="number" class="form-control" id="deliveryFee" value="40">
+              </div>
+              <div class="mb-3">
+                <label>Free Delivery Threshold (₹)</label>
+                <input type="number" class="form-control" id="freeDeliveryThreshold" value="500">
+              </div>
+              <div class="mb-3">
+                <label>Min Order Amount (₹)</label>
+                <input type="number" class="form-control" id="minOrderAmount" value="100">
+              </div>
+              <div class="mb-3">
+                <label>Delivery Radius (km)</label>
+                <input type="number" class="form-control" id="deliveryRadius" value="10">
+              </div>
+              <div class="mb-3">
+                <label>Max Guests per Table</label>
+                <input type="number" class="form-control" id="maxGuests" value="8">
+              </div>
+            </form>
+          </div>
+        </div>
+        
+        <!-- Admin Settings -->
+        <div class="col-md-6">
+          <div class="chart-container">
+            <h6 style="color: var(--gold);"><i class="fas fa-shield-alt me-2"></i>Admin Access</h6>
+            <form class="admin-form" id="adminSettingsForm">
+              <div class="mb-3">
+                <label>Admin Phone Numbers (comma separated)</label>
+                <input type="text" class="form-control" id="adminPhones" value="+917002012345,+919876543210">
+              </div>
+              <div class="mb-3">
+                <label>Current Admin Password (for changes)</label>
+                <input type="password" class="form-control" id="adminPassword" placeholder="Enter password to confirm">
+              </div>
+            </form>
+          </div>
+        </div>
+        
+        <!-- Save Button -->
+        <div class="col-12 text-end">
+          <button class="btn-gold px-5 py-3" onclick="saveAllSettings()">
+            <i class="fas fa-save me-2"></i>Save All Settings
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+<script src="js/admin-api.js"></script>
+<script src="js/settings.js"></script>
+</body>
+</html>
