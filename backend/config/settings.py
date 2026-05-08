@@ -89,7 +89,6 @@ class Settings(BaseSettings):
 ADMIN_EMAIL: str = "admin@cheesycrust.co"
 ADMIN_PASSWORD: str = "Admin@123456"
 ADMIN_JWT_SECRET: str = Field(default="admin_secret_key_change_in_production", env="ADMIN_JWT_SECRET")
-    
     @field_validator("ADMIN_PHONE_NUMBERS", mode="before")
     @classmethod
     def parse_admin_phones(cls, v):
