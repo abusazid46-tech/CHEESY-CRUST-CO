@@ -445,13 +445,12 @@ const adminApi = new AdminApiService();
 function requireAdminAuth() {
     const token = localStorage.getItem('admin_token');
     
-    if (!token) {
+    if (!token) {  // ← ONLY check token, remove adminData.email check
         window.location.href = 'index.html';
         return false;
     }
-    return true;  // Only check token, not adminData.email
+    return true;
 }
-
 // ========== LOGOUT ==========
 async function adminLogout() {
     try {
