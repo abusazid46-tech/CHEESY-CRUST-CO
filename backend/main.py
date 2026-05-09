@@ -9,6 +9,20 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
 
+
+# Keep other imports
+from routes import (
+    auth_router,
+    menu_router,
+    cart_router,
+    order_router,
+    payment_router,
+    reservation_router,
+    user_router,
+    admin_router
+    # Remove admin_auth_router from here
+)
+from routes.admin_auth import router as admin_auth_router  # Direct import
 from config.settings import settings
 from database import connect_to_mongo, close_mongo_connection
 from routes import (
