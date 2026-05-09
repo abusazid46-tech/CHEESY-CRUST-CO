@@ -133,12 +133,13 @@ class Collections:
     @property
     def reviews(self):
         return db.reviews
-@property
-def admins(self):
-    return db.admins
-
-@property
-def admin_sessions(self):
-    return db.admin_sessions
+    
+    @property
+    def admins(self):
+        return db.admins
+    
+    @property
+    def admin_sessions(self):
+        return db.admin_sessions
 
 collections = Collections()
