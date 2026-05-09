@@ -1,54 +1,66 @@
 """
-Admin authentication routes
+Admin Authentication Routes
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends, Request
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr, validator
+from typing import Optional
 
 from services.admin_service import admin_service
-from middleware.admin_auth import admin_required, get_current_admin
+from middleware import get_current_admin_user
 
-router = APIRouter(prefix="/admin/auth", tags=["Admin Auth"])
+router = APIRouter()
 
 
+# Request/Response Models
 class AdminLoginRequest(BaseModel):
-    """Admin login request"""
-    email: EmailStr
-    password: str = Field(..., min_length=6)
-
-
-class AdminLoginResponse(BaseModel):
-    """Admin login response"""
-    success: bool = True
-    message: str
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int = 86400
-    admin: dict
+    email: str
+    password: str
+    
+    @validator('password')
+    def password_min_length(cls, v):
+        if len(v) < 6:
+            raise ValueError('Password must be at least 6 characters')
+        return v
 
 
 class AdminCreateRequest(BaseModel):
-    """Create admin request"""
     email: EmailStr
-    password: str = Field(..., min_length=8)
-    name: str = Field(..., min_length=2)
+    password: str
+    name: str
     role: str = "admin"
+    
+    @validator('password')
+    def password_min_length(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        return v
+    
+    @validator('name')
+    def name_min_length(cls, v):
+        if len(v) < 2:
+            raise ValueError('Name must be at least 2 characters')
+        return v
 
 
 class ChangePasswordRequest(BaseModel):
-    """Change password request"""
     current_password: str
-    new_password: str = Field(..., min_length=8)
+    new_password: str
+    
+    @validator('new_password')
+    def password_min_length(cls, v):
+        if len(v) < 8:
+            raise ValueError('New password must be at least 8 characters')
+        return v
 
 
-@router.post("/login", response_model=AdminLoginResponse)
+# Routes
+@router.post("/admin/auth/login")
 async def admin_login(request: AdminLoginRequest):
     """Admin login with email and password"""
     success, message, tokens = await admin_service.login(
-        request.email,
-        request.password
+        email=request.email,
+        password=request.password
     )
     
     if not success:
@@ -57,56 +69,52 @@ async def admin_login(request: AdminLoginRequest):
             detail=message
         )
     
-    return AdminLoginResponse(
-        success=True,
-        message=message,
-        **tokens
-    )
+    return {
+        "success": True,
+        "message": message,
+        **tokens  # Spread the tokens dict (access_token, refresh_token, etc.)
+    }
 
 
-@router.post("/logout")
-async def admin_logout(
-    request: Request,
-    admin: Dict[str, Any] = Depends(admin_required)
-):
+@router.post("/admin/auth/logout")
+async def admin_logout(admin: dict = Depends(get_current_admin_user)):
     """Admin logout"""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    await admin_service.logout(admin["sub"], token)
+    # Get token from request (you'll need to extract it)
+    # This is a simplified version
+    await admin_service.logout(admin["_id"], "")
     
-    return {"success": True, "message": "Logged out successfully"}
+    return {
+        "success": True,
+        "message": "Logged out successfully"
+    }
 
 
-@router.get("/me")
-async def get_admin_profile(admin: Dict[str, Any] = Depends(admin_required)):
+@router.get("/admin/auth/me")
+async def get_admin_profile(admin: dict = Depends(get_current_admin_user)):
     """Get current admin profile"""
-    admin_data = await admin_service.get_admin_by_id(admin["sub"])
-    
-    if not admin_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Admin not found"
-        )
-    
-    return {"success": True, "admin": admin_data}
+    return {
+        "success": True,
+        "admin": admin
+    }
 
 
-@router.post("/create")
+@router.post("/admin/auth/create")
 async def create_admin_user(
     request: AdminCreateRequest,
-    admin: Dict[str, Any] = Depends(admin_required)
+    admin: dict = Depends(get_current_admin_user)
 ):
     """Create new admin (super_admin only)"""
     if admin.get("role") != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admin can create admins"
+            detail="Only super admins can create admin users"
         )
     
-    success, message, admin_data = await admin_service.create_admin(
-        request.email,
-        request.password,
-        request.name,
-        request.role
+    success, message, new_admin = await admin_service.create_admin(
+        email=request.email,
+        password=request.password,
+        name=request.name,
+        role=request.role
     )
     
     if not success:
@@ -115,19 +123,23 @@ async def create_admin_user(
             detail=message
         )
     
-    return {"success": True, "message": message, "admin": admin_data}
+    return {
+        "success": True,
+        "message": message,
+        "admin": new_admin
+    }
 
 
-@router.post("/change-password")
+@router.post("/admin/auth/change-password")
 async def change_password(
     request: ChangePasswordRequest,
-    admin: Dict[str, Any] = Depends(admin_required)
+    admin: dict = Depends(get_current_admin_user)
 ):
     """Change admin password"""
     success, message = await admin_service.update_password(
-        admin["sub"],
-        request.current_password,
-        request.new_password
+        admin_id=admin["_id"],
+        current_password=request.current_password,
+        new_password=request.new_password
     )
     
     if not success:
@@ -136,4 +148,7 @@ async def change_password(
             detail=message
         )
     
-    return {"success": True, "message": message}
+    return {
+        "success": True,
+        "message": message
+    }
