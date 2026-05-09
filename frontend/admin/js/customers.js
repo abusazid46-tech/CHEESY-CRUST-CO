@@ -1,71 +1,108 @@
-// Customer CRM Logic
-requireAdminAuth();
+// Dashboard Logic
+if (!localStorage.getItem('admin_token')) {
+    window.location.href = 'index.html';
+}
 
-let custPage = 1;
+let salesChart = null;
 
-async function loadCustomers(page = 1) {
-    custPage = page;
-    const search = document.getElementById('searchCustomer')?.value || '';
-    
+async function verifyAdminAccess() {
+    const token = localStorage.getItem('admin_token');
+    if (!token) {
+        window.location.href = 'index.html';
+        return;
+    }
     try {
-        const data = await adminApi.getCustomers(page, search);
-        
-        if (data.success) {
-            document.getElementById('totalCust').innerText = data.total;
-            document.getElementById('activeCust').innerText = Math.floor(data.total * 0.7);
-            document.getElementById('newCust').innerText = Math.floor(data.total * 0.2);
-            renderCustomersTable(data.users);
-            renderCustPagination(data.total, data.page, data.total_pages);
+        const response = await fetch(`${ADMIN_API_BASE}/admin/auth/me`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) {
+            localStorage.clear();
+            window.location.href = 'index.html';
+            return;
+        }
+        const data = await response.json();
+        if (data.admin) {
+            localStorage.setItem('admin_data', JSON.stringify(data.admin));
         }
     } catch (error) {
-        console.error('Customers error:', error);
-        showAdminToast('Failed to load customers', 'error');
+        console.log('Auth check skipped - network may be slow');
     }
 }
 
-function renderCustomersTable(users) {
-    const tbody = document.getElementById('customersTable');
-    
-    if (!users || users.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No customers found</td></tr>';
+async function loadDashboard() {
+    try {
+        const data = await adminApi.getDashboard();
+        if (data.success) {
+            const stats = data.stats;
+            document.getElementById('totalOrders').innerText = stats.total_orders || 0;
+            document.getElementById('totalRevenue').innerHTML = formatCurrency(stats.total_revenue || 0);
+            document.getElementById('totalCustomers').innerText = stats.total_users || 0;
+            document.getElementById('todayOrders').innerText = stats.today_orders || 0;
+            renderRecentOrders(data.recent_orders || []);
+        }
+    } catch (error) {
+        console.error('Dashboard error:', error);
+    }
+}
+
+async function loadSalesChart() {
+    try {
+        const data = await adminApi.getSalesSummary('week');
+        if (data.success && data.sales_data) {
+            const labels = data.sales_data.map(d => d._id);
+            const values = data.sales_data.map(d => d.revenue);
+            const ctx = document.getElementById('salesChart').getContext('2d');
+            if (salesChart) salesChart.destroy();
+            salesChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Revenue (₹)',
+                        data: values,
+                        borderColor: '#cda45e',
+                        backgroundColor: 'rgba(205,164,94,0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { labels: { color: '#bbb' } } },
+                    scales: {
+                        x: { ticks: { color: '#888' }, grid: { color: 'rgba(205,164,94,0.05)' } },
+                        y: { ticks: { color: '#888', callback: v => '₹' + v }, grid: { color: 'rgba(205,164,94,0.05)' } }
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Chart error:', error);
+    }
+}
+
+function renderRecentOrders(orders) {
+    const tbody = document.getElementById('recentOrdersTable');
+    if (!orders || orders.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No orders yet</td></tr>';
         return;
     }
-    
-    tbody.innerHTML = users.map((user, index) => `
+    tbody.innerHTML = orders.map(order => `
         <tr>
-            <td>${(custPage - 1) * 20 + index + 1}</td>
-            <td><strong>${user.name || 'N/A'}</strong></td>
-            <td>${user.phone}</td>
-            <td>${user.email || 'N/A'}</td>
-            <td><span class="badge-status badge-confirmed">${user.order_count || 0} orders</span></td>
-            <td>${formatDate(user.created_at)}</td>
-            <td>
-                <button class="btn-icon" onclick="viewCustomerDetail('${user._id}')" title="View" style="width: 32px; height: 32px;">
-                    <i class="fas fa-eye"></i>
-                </button>
-            </td>
+            <td><a href="orders.html?id=${order._id}" style="color: var(--gold);">#${order.order_number || 'N/A'}</a></td>
+            <td>${order.user_phone || 'N/A'}</td>
+            <td>${order.items?.length || 0} items</td>
+            <td>${formatCurrency(order.total)}</td>
+            <td><span class="badge-status badge-${order.status || 'pending'}">${order.status || 'pending'}</span></td>
+            <td>${formatDate(order.created_at)}</td>
         </tr>
     `).join('');
 }
 
-function renderCustPagination(total, page, totalPages) {
-    const div = document.getElementById('custPagination');
-    div.innerHTML = `
-        <span class="text-muted">Page ${page} of ${totalPages} (${total} customers)</span>
-        <div>
-            <button class="btn-outline me-2" onclick="loadCustomers(${page - 1})" ${page <= 1 ? 'disabled' : ''}>
-                <i class="fas fa-chevron-left"></i>
-            </button>
-            <button class="btn-outline" onclick="loadCustomers(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>
-                <i class="fas fa-chevron-right"></i>
-            </button>
-        </div>
-    `;
-}
-
-// Search
-document.getElementById('searchCustomer')?.addEventListener('keyup', function(e) {
-    if (e.key === 'Enter') loadCustomers(1);
+document.addEventListener('DOMContentLoaded', async () => {
+    await verifyAdminAccess();
+    loadDashboard();
+    loadSalesChart();
+    setInterval(loadDashboard, 60000);
 });
-
-document.addEventListener('DOMContentLoaded', () => loadCustomers());
