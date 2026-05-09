@@ -1,9 +1,8 @@
-// admin-auth.js - Matched to your HTML structure
+// admin-auth.js - With CORRECT API URL
 (function() {
     'use strict';
     
-    // ========== CONFIGURATION ==========
-    // Change this to your actual Render backend URL
+    // ========== CORRECT CONFIGURATION ==========
     const API_URL = 'https://cheesy-crust-api.onrender.com/api';
     console.log('🔧 API URL:', API_URL);
     
@@ -57,7 +56,7 @@
         event.preventDefault();
         console.log('📝 Login attempt started');
         
-        // Get form elements - matching your HTML IDs
+        // Get form elements
         const emailInput = document.getElementById('adminEmail');
         const passwordInput = document.getElementById('adminPassword');
         const rememberCheckbox = document.getElementById('rememberMe');
@@ -107,6 +106,7 @@
         }
         
         try {
+            // Using CORRECT API URL now
             const loginUrl = `${API_URL}/admin/login`;
             console.log('📡 POST:', loginUrl);
             console.log('📦 Body:', { email, password: '***' });
@@ -143,7 +143,7 @@
                     localStorage.setItem('adminToken', token);
                     console.log('🔑 Token stored');
                     
-                    // Store user data if available
+                    // Store admin data if available
                     if (data.admin || data.user) {
                         const adminData = data.admin || data.user;
                         localStorage.setItem('adminData', JSON.stringify(adminData));
@@ -186,10 +186,7 @@
                 showMessage(`
                     <strong>Server Connection Failed</strong><br>
                     <small>Cannot reach: ${API_URL}</small><br>
-                    <small>Please check:</small><br>
-                    <small>1. Your internet connection</small><br>
-                    <small>2. The server is running</small><br>
-                    <small>3. CORS is enabled</small>
+                    <small>Please check if the server is running</small>
                 `, 'danger');
             } else {
                 showMessage(`Login failed: ${error.message}`, 'danger');
@@ -206,6 +203,7 @@
     // ========== INITIALIZATION ==========
     function init() {
         console.log('🚀 Admin Auth initializing...');
+        console.log('🌐 Target API:', API_URL);
         
         // Find form using the correct ID from your HTML
         const form = document.getElementById('adminLoginForm');
@@ -234,7 +232,8 @@
                 throw new Error(`Status: ${res.status}`);
             })
             .then(data => {
-                console.log('✅ Health check:', data);
+                console.log('✅ Health check response:', data);
+                showMessage('Connected to server successfully!', 'success');
             })
             .catch(err => {
                 console.warn('⚠️ API health check failed:', err.message);
