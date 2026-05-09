@@ -4,7 +4,7 @@ Admin Authentication Routes
 """
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from typing import Dict, Any
 
 from services.admin_service import admin_service
@@ -25,17 +25,8 @@ class AdminLoginRequest(BaseModel):
         }
 
 
-class AdminLoginResponse(BaseModel):
-    success: bool = True
-    message: str
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int = 86400
-    admin: Dict[str, Any]
-
-
-@router.post("/admin/auth/login", response_model=AdminLoginResponse)
+# REMOVE response_model - it's causing issues
+@router.post("/admin/auth/login")
 async def admin_login(request: AdminLoginRequest):
     """Admin login with email and password"""
     print(f"Login attempt: {request.email}")  # Debug log
@@ -46,18 +37,22 @@ async def admin_login(request: AdminLoginRequest):
     )
     
     if not success:
+        # FIX: Use string detail, not dict
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"message": message}
+            detail=message  # Changed from {"message": message} to just message
         )
     
-    return AdminLoginResponse(
-        success=True,
-        message=message,
-        access_token=tokens["access_token"],
-        refresh_token=tokens["refresh_token"],
-        admin=tokens["admin"]
-    )
+    # Return plain dict without Pydantic model
+    return {
+        "success": True,
+        "message": message,
+        "access_token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"],
+        "token_type": tokens.get("token_type", "bearer"),
+        "expires_in": tokens.get("expires_in", 86400),
+        "admin": tokens["admin"]
+    }
 
 
 @router.post("/admin/auth/logout")
@@ -69,7 +64,6 @@ async def admin_logout():
 @router.get("/admin/auth/me")
 async def get_admin_profile():
     """Get current admin profile"""
-    # This would normally require authentication
     return {"message": "Please provide admin token"}
 
 
@@ -83,14 +77,3 @@ async def create_admin_user():
 async def change_password():
     """Change admin password"""
     return {"message": "Not implemented yet"}
-
-# Add this TEMPORARY test endpoint to your admin_auth.py
-@router.post("/admin/auth/test-login")
-async def test_login():
-    """Test endpoint to verify routing works"""
-    return {"message": "POST request received successfully"}
-
-@router.get("/admin/auth/test")
-async def test_get():
-    """Test GET endpoint"""
-    return {"message": "GET works"}
