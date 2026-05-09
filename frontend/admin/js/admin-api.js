@@ -87,7 +87,6 @@ class AdminApiService {
         localStorage.removeItem('admin_data');
         window.location.href = 'index.html';
     }
-}
     
     // ========== DASHBOARD ==========
     async getDashboard() {
