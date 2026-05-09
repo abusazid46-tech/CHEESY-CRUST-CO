@@ -6,6 +6,7 @@ from .orders import router as order_router
 from .payment import router as payment_router
 from .reservation import router as reservation_router
 from .admin import router as admin_router
+from routes.admin_auth import router as admin_auth_router
 
 __all__ = [
     "auth_router",
@@ -16,4 +17,5 @@ __all__ = [
     "payment_router",
     "reservation_router",
     "admin_router"
+    "admin_auth_router"
 ]
