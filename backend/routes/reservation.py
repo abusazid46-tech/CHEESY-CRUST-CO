@@ -5,7 +5,7 @@ Reservation routes - table booking
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Dict, Any, Optional
 from datetime import date
-
+from middleware.admin_auth import admin_required  # ADD THIS LINE
 from middleware import auth_optional, auth_required, get_current_user, get_current_admin_user
 from schemas.reservation import (
     ReservationCreateRequest, ReservationResponse,
