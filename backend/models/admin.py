@@ -16,15 +16,18 @@ class PyObjectId(ObjectId):
         yield cls.validate
 
     @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid objectid")
-        return ObjectId(v)
+    def validate(cls, v, info=None):  # <-- ADD info=None parameter
+        if isinstance(v, ObjectId):
+            return v
+        if isinstance(v, str):
+            if not ObjectId.is_valid(v):
+                raise ValueError("Invalid objectid")
+            return ObjectId(v)
+        raise ValueError("Invalid objectid")
 
     @classmethod
     def __get_pydantic_json_schema__(cls, _schema_generator):
         return {"type": "string"}
-
 
 class Admin(BaseModel):
     """Admin user model"""
