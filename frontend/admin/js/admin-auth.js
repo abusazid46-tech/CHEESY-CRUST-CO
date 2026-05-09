@@ -1,10 +1,23 @@
-// admin-auth.js - With CORRECT API URL
+// admin-auth.js - With CORRECT API endpoints from OpenAPI spec
 (function() {
     'use strict';
     
-    // ========== CORRECT CONFIGURATION ==========
-    const API_URL = 'https://cheesy-crust-api.onrender.com/api';
+    // ========== CORRECT API CONFIGURATION ==========
+    const API_BASE = 'https://cheesy-crust-api.onrender.com';
+    const API_VERSION = '/api/v1';
+    const API_URL = `${API_BASE}${API_VERSION}`;
+    
+    const ENDPOINTS = {
+        health: `${API_BASE}/health`,
+        login: `${API_URL}/admin/auth/login`,
+        logout: `${API_URL}/admin/auth/logout`,
+        profile: `${API_URL}/admin/auth/me`,
+        dashboard: `${API_URL}/admin/dashboard`
+    };
+    
+    console.log('🔧 API Base:', API_BASE);
     console.log('🔧 API URL:', API_URL);
+    console.log('🔧 Login URL:', ENDPOINTS.login);
     
     // ========== UTILITY FUNCTIONS ==========
     function showMessage(message, type = 'danger') {
@@ -50,6 +63,29 @@
             if (rememberCheckbox) rememberCheckbox.checked = true;
         }
     });
+    
+    // ========== API HELPER ==========
+    async function apiCall(endpoint, options = {}) {
+        const token = localStorage.getItem('adminToken');
+        const headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            ...options.headers
+        };
+        
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        const response = await fetch(endpoint, {
+            ...options,
+            headers,
+            mode: 'cors',
+            credentials: 'include'
+        });
+        
+        return response;
+    }
     
     // ========== LOGIN HANDLER ==========
     async function handleLogin(event) {
@@ -106,25 +142,17 @@
         }
         
         try {
-            // Using CORRECT API URL now
-            const loginUrl = `${API_URL}/admin/login`;
-            console.log('📡 POST:', loginUrl);
+            console.log('📡 POST:', ENDPOINTS.login);
             console.log('📦 Body:', { email, password: '***' });
             
-            const response = await fetch(loginUrl, {
+            const response = await apiCall(ENDPOINTS.login, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({ email, password }),
-                mode: 'cors',
-                credentials: 'include'
+                body: JSON.stringify({ email, password })
             });
             
             console.log('📨 Status:', response.status);
             
-            // Try to parse JSON response
+            // Parse response
             let data;
             try {
                 data = await response.json();
@@ -134,37 +162,38 @@
                 throw new Error('Invalid server response');
             }
             
-            if (response.ok) {
+            if (response.ok && data.success !== false) {
                 console.log('✅ Login successful');
                 
-                // Store authentication data
-                if (data.access_token || data.token) {
-                    const token = data.access_token || data.token;
-                    localStorage.setItem('adminToken', token);
-                    console.log('🔑 Token stored');
-                    
-                    // Store admin data if available
-                    if (data.admin || data.user) {
-                        const adminData = data.admin || data.user;
-                        localStorage.setItem('adminData', JSON.stringify(adminData));
-                        console.log('👤 Admin data stored:', adminData.name || adminData.email);
-                    }
-                    
-                    showMessage('Login successful! Redirecting...', 'success');
-                    
-                    // Redirect to dashboard
-                    const redirectUrl = data.redirect_url || '/admin/dashboard.html';
-                    console.log('🔄 Redirecting to:', redirectUrl);
-                    
-                    setTimeout(() => {
-                        window.location.href = redirectUrl;
-                    }, 1000);
-                } else {
-                    showMessage('No authentication token received', 'danger');
+                // Store authentication data based on your API response structure
+                // From OpenAPI: AdminLoginResponse has access_token, refresh_token, admin
+                if (data.access_token) {
+                    localStorage.setItem('adminToken', data.access_token);
+                    console.log('🔑 Access token stored');
                 }
                 
+                if (data.refresh_token) {
+                    localStorage.setItem('adminRefreshToken', data.refresh_token);
+                    console.log('🔑 Refresh token stored');
+                }
+                
+                if (data.admin) {
+                    localStorage.setItem('adminData', JSON.stringify(data.admin));
+                    console.log('👤 Admin data stored:', data.admin.name || data.admin.email);
+                }
+                
+                showMessage(data.message || 'Login successful! Redirecting...', 'success');
+                
+                // Redirect to dashboard
+                const redirectUrl = '/admin/dashboard.html';
+                console.log('🔄 Redirecting to:', redirectUrl);
+                
+                setTimeout(() => {
+                    window.location.href = redirectUrl;
+                }, 1000);
+                
             } else {
-                // Handle different error status codes
+                // Handle error
                 const errorMsg = data.detail || data.message || 'Invalid credentials';
                 console.error('❌ Login failed:', errorMsg);
                 
@@ -174,6 +203,15 @@
                     showMessage('Account is disabled. Contact support.', 'danger');
                 } else if (response.status === 429) {
                     showMessage('Too many attempts. Please try again later.', 'warning');
+                } else if (response.status === 422) {
+                    // Validation error
+                    const details = data.detail;
+                    if (Array.isArray(details)) {
+                        const messages = details.map(d => d.msg).join(', ');
+                        showMessage(`Validation error: ${messages}`, 'warning');
+                    } else {
+                        showMessage(`Validation error: ${JSON.stringify(details)}`, 'warning');
+                    }
                 } else {
                     showMessage(errorMsg, 'danger');
                 }
@@ -185,8 +223,8 @@
             if (error.message === 'Failed to fetch' || error.name === 'TypeError') {
                 showMessage(`
                     <strong>Server Connection Failed</strong><br>
-                    <small>Cannot reach: ${API_URL}</small><br>
-                    <small>Please check if the server is running</small>
+                    <small>Cannot reach: ${API_BASE}</small><br>
+                    <small>Please check your internet connection and try again.</small>
                 `, 'danger');
             } else {
                 showMessage(`Login failed: ${error.message}`, 'danger');
@@ -200,45 +238,83 @@
         }
     }
     
+    // ========== CHECK AUTH STATUS ==========
+    async function checkAuthStatus() {
+        const token = localStorage.getItem('adminToken');
+        if (!token) return false;
+        
+        try {
+            const response = await apiCall(ENDPOINTS.profile, {
+                method: 'GET'
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('✅ Already authenticated as:', data.email || data.name);
+                return true;
+            } else if (response.status === 401) {
+                // Token expired
+                localStorage.removeItem('adminToken');
+                localStorage.removeItem('adminRefreshToken');
+                localStorage.removeItem('adminData');
+                return false;
+            }
+        } catch (error) {
+            console.log('Auth check failed:', error);
+            return false;
+        }
+        
+        return false;
+    }
+    
     // ========== INITIALIZATION ==========
-    function init() {
+    async function init() {
         console.log('🚀 Admin Auth initializing...');
-        console.log('🌐 Target API:', API_URL);
+        console.log('🌐 API Base:', API_BASE);
+        console.log('🔗 Login Endpoint:', ENDPOINTS.login);
         
-        // Find form using the correct ID from your HTML
+        // Check if already authenticated
+        const isAuthenticated = await checkAuthStatus();
+        if (isAuthenticated) {
+            console.log('✅ Already logged in, redirecting to dashboard...');
+            window.location.href = '/admin/dashboard.html';
+            return;
+        }
+        
+        // Find form
         const form = document.getElementById('adminLoginForm');
-        
         if (form) {
             console.log('✅ Admin login form found');
             form.addEventListener('submit', handleLogin);
         } else {
-            console.error('❌ Login form not found! Looking for id="adminLoginForm"');
+            console.error('❌ Login form not found!');
             showMessage('Page error: Login form not found. Please refresh.', 'warning');
             return;
         }
         
         // Test API connection
         console.log('🔍 Testing API connection...');
-        fetch(`${API_URL}/health`, { 
-            method: 'GET',
-            mode: 'cors',
-            headers: { 'Accept': 'application/json' }
-        })
-            .then(res => {
-                if (res.ok) {
-                    console.log('✅ API is reachable');
-                    return res.json();
-                }
-                throw new Error(`Status: ${res.status}`);
-            })
-            .then(data => {
-                console.log('✅ Health check response:', data);
-                showMessage('Connected to server successfully!', 'success');
-            })
-            .catch(err => {
-                console.warn('⚠️ API health check failed:', err.message);
-                console.warn('Login might still work if health endpoint is not configured');
+        try {
+            const response = await fetch(ENDPOINTS.health, { 
+                method: 'GET',
+                mode: 'cors',
+                headers: { 'Accept': 'application/json' }
             });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('✅ API is reachable:', data);
+                showMessage('Connected to server successfully!', 'success');
+            } else {
+                console.warn('⚠️ Health check returned status:', response.status);
+            }
+        } catch (error) {
+            console.warn('⚠️ Health check failed:', error.message);
+            console.log('💡 This might be OK if health endpoint is not configured');
+        }
+        
+        console.log('✅ Initialization complete');
+        console.log('💡 API Documentation:', `${API_BASE}/docs`);
     }
     
     // Start when DOM is ready
