@@ -4,7 +4,7 @@ Order routes - order creation and management
 
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Dict, Any, Optional
-
+from middleware.admin_auth import admin_required
 from middleware import auth_required, get_current_user, get_current_admin_user
 from schemas.order import OrderCreateRequest, OrderResponse, OrderStatusUpdateRequest
 from services import order_service
@@ -107,7 +107,7 @@ async def track_order(order_number: str):
 
 @router.get("/admin/all")
 async def get_all_orders(
-    admin: Dict[str, Any] = Depends(get_current_admin_user),
+    payload: Dict[str, Any] = Depends(admin_required),  # ← Changed
     status: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100)
@@ -129,7 +129,7 @@ async def get_all_orders(
 async def update_order_status(
     order_id: str,
     request: OrderStatusUpdateRequest,
-    admin: Dict[str, Any] = Depends(get_current_admin_user)
+    payload: Dict[str, Any] = Depends(admin_required)  # ← Changed
 ):
     """Update order status (admin only)"""
     try:
