@@ -1,69 +1,115 @@
-// admin-auth.js
+// admin-auth.js - Matched to your HTML structure
 (function() {
     'use strict';
     
     // ========== CONFIGURATION ==========
-    // IMPORTANT: Update this URL to match your deployed backend
-    const API_URL = 'https://your-app-name.onrender.com/api';
-    // For local testing: const API_URL = 'http://localhost:8000/api';
+    // Change this to your actual Render backend URL
+    const API_URL = 'https://cheesy-crust-co.onrender.com/api';
+    console.log('🔧 API URL:', API_URL);
     
-    console.log('API URL configured as:', API_URL);
-    
-    // ========== HELPER FUNCTIONS ==========
-    function showError(message) {
-        console.error('Error:', message);
+    // ========== UTILITY FUNCTIONS ==========
+    function showMessage(message, type = 'danger') {
+        console.log(`[${type}] ${message}`);
         
-        // Check if alert element exists
-        const alertEl = document.getElementById('loginAlert');
-        if (alertEl) {
-            alertEl.textContent = message;
-            alertEl.style.display = 'block';
-            
-            // Hide after 5 seconds
-            setTimeout(() => {
-                alertEl.style.display = 'none';
-            }, 5000);
-        } else {
-            alert(message); // Fallback to browser alert
+        const messageBox = document.getElementById('messageBox');
+        if (messageBox) {
+            messageBox.innerHTML = `
+                <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
         }
     }
     
-    function showSuccess(message) {
-        const alertEl = document.getElementById('loginAlert');
-        if (alertEl) {
-            alertEl.className = 'alert alert-success';
-            alertEl.textContent = message;
-            alertEl.style.display = 'block';
-        }
+    // Toggle password visibility
+    const togglePasswordBtn = document.getElementById('togglePassword');
+    if (togglePasswordBtn) {
+        togglePasswordBtn.addEventListener('click', function() {
+            const passwordInput = document.getElementById('adminPassword');
+            const icon = this.querySelector('i');
+            
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                passwordInput.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        });
     }
+    
+    // Remember me functionality
+    document.addEventListener('DOMContentLoaded', function() {
+        const rememberedEmail = localStorage.getItem('rememberedAdminEmail');
+        if (rememberedEmail) {
+            const emailInput = document.getElementById('adminEmail');
+            const rememberCheckbox = document.getElementById('rememberMe');
+            if (emailInput) emailInput.value = rememberedEmail;
+            if (rememberCheckbox) rememberCheckbox.checked = true;
+        }
+    });
     
     // ========== LOGIN HANDLER ==========
     async function handleLogin(event) {
         event.preventDefault();
+        console.log('📝 Login attempt started');
         
-        console.log('Login attempt started');
+        // Get form elements - matching your HTML IDs
+        const emailInput = document.getElementById('adminEmail');
+        const passwordInput = document.getElementById('adminPassword');
+        const rememberCheckbox = document.getElementById('rememberMe');
+        const loginBtn = document.getElementById('loginBtn');
         
-        // Get form elements
-        const email = document.getElementById('email')?.value;
-        const password = document.getElementById('password')?.value;
-        const submitBtn = document.getElementById('loginButton');
-        
-        if (!email || !password) {
-            showError('Please enter email and password');
+        // Validate elements exist
+        if (!emailInput || !passwordInput) {
+            showMessage('Login form fields not found. Please refresh the page.', 'warning');
             return;
         }
         
-        console.log('Attempting login for:', email);
+        const email = emailInput.value.trim();
+        const password = passwordInput.value;
         
-        // Disable button and show loading state
-        if (submitBtn) {
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Logging in...';
+        // Validate inputs
+        if (!email) {
+            showMessage('Please enter your email address', 'warning');
+            emailInput.focus();
+            return;
+        }
+        
+        if (!password) {
+            showMessage('Please enter your password', 'warning');
+            passwordInput.focus();
+            return;
+        }
+        
+        // Email format validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            showMessage('Please enter a valid email address', 'warning');
+            emailInput.focus();
+            return;
+        }
+        
+        // Handle Remember Me
+        if (rememberCheckbox && rememberCheckbox.checked) {
+            localStorage.setItem('rememberedAdminEmail', email);
+        } else {
+            localStorage.removeItem('rememberedAdminEmail');
+        }
+        
+        // Show loading state
+        if (loginBtn) {
+            loginBtn.disabled = true;
+            loginBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Signing in...';
         }
         
         try {
             const loginUrl = `${API_URL}/admin/login`;
-            console.log('Sending request to:', loginUrl);
+            console.log('📡 POST:', loginUrl);
+            console.log('📦 Body:', { email, password: '***' });
             
             const response = await fetch(loginUrl, {
                 method: 'POST',
@@ -71,106 +117,136 @@
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
                 },
-                body: JSON.stringify({ 
-                    email: email, 
-                    password: password 
-                }),
-                // Add this for credentials/cookies if needed
+                body: JSON.stringify({ email, password }),
+                mode: 'cors',
                 credentials: 'include'
             });
             
-            console.log('Response status:', response.status);
-            console.log('Response ok:', response.ok);
+            console.log('📨 Status:', response.status);
             
-            // Try to parse response
+            // Try to parse JSON response
             let data;
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
+            try {
                 data = await response.json();
-                console.log('Response data:', data);
-            } else {
-                const text = await response.text();
-                console.log('Response text:', text);
-                throw new Error(`Unexpected response type: ${contentType}`);
+                console.log('📋 Response:', data);
+            } catch (e) {
+                console.error('Failed to parse response:', e);
+                throw new Error('Invalid server response');
             }
             
             if (response.ok) {
-                showSuccess('Login successful! Redirecting...');
+                console.log('✅ Login successful');
                 
-                // Store token if provided
-                if (data.access_token) {
-                    localStorage.setItem('adminToken', data.access_token);
-                    localStorage.setItem('adminData', JSON.stringify(data.admin || data.user));
+                // Store authentication data
+                if (data.access_token || data.token) {
+                    const token = data.access_token || data.token;
+                    localStorage.setItem('adminToken', token);
+                    console.log('🔑 Token stored');
+                    
+                    // Store user data if available
+                    if (data.admin || data.user) {
+                        const adminData = data.admin || data.user;
+                        localStorage.setItem('adminData', JSON.stringify(adminData));
+                        console.log('👤 Admin data stored:', adminData.name || adminData.email);
+                    }
+                    
+                    showMessage('Login successful! Redirecting...', 'success');
+                    
+                    // Redirect to dashboard
+                    const redirectUrl = data.redirect_url || '/admin/dashboard.html';
+                    console.log('🔄 Redirecting to:', redirectUrl);
+                    
+                    setTimeout(() => {
+                        window.location.href = redirectUrl;
+                    }, 1000);
+                } else {
+                    showMessage('No authentication token received', 'danger');
                 }
                 
-                // Redirect after short delay
-                setTimeout(() => {
-                    window.location.href = data.redirect_url || '/admin/dashboard.html';
-                }, 1000);
             } else {
-                const errorMsg = data.detail || data.message || 'Login failed';
-                showError(errorMsg);
+                // Handle different error status codes
+                const errorMsg = data.detail || data.message || 'Invalid credentials';
+                console.error('❌ Login failed:', errorMsg);
+                
+                if (response.status === 401) {
+                    showMessage('Invalid email or password', 'danger');
+                } else if (response.status === 403) {
+                    showMessage('Account is disabled. Contact support.', 'danger');
+                } else if (response.status === 429) {
+                    showMessage('Too many attempts. Please try again later.', 'warning');
+                } else {
+                    showMessage(errorMsg, 'danger');
+                }
             }
             
         } catch (error) {
-            console.error('Login error details:', {
-                message: error.message,
-                name: error.name,
-                stack: error.stack
-            });
+            console.error('💥 Login error:', error);
             
-            if (error.message === 'Failed to fetch') {
-                showError('Cannot connect to server. Please check:\n' +
-                         '1. Your internet connection\n' +
-                         '2. The server is running\n' +
-                         '3. The API URL is correct: ' + API_URL);
+            if (error.message === 'Failed to fetch' || error.name === 'TypeError') {
+                showMessage(`
+                    <strong>Server Connection Failed</strong><br>
+                    <small>Cannot reach: ${API_URL}</small><br>
+                    <small>Please check:</small><br>
+                    <small>1. Your internet connection</small><br>
+                    <small>2. The server is running</small><br>
+                    <small>3. CORS is enabled</small>
+                `, 'danger');
             } else {
-                showError('Login failed: ' + error.message);
+                showMessage(`Login failed: ${error.message}`, 'danger');
             }
-            
         } finally {
-            // Re-enable button
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Login';
+            // Reset button state
+            if (loginBtn) {
+                loginBtn.disabled = false;
+                loginBtn.innerHTML = '<i class="fas fa-sign-in-alt me-2"></i>Sign In';
             }
         }
     }
     
     // ========== INITIALIZATION ==========
-    document.addEventListener('DOMContentLoaded', () => {
-        console.log('Admin auth initialized');
-        console.log('API URL:', API_URL);
+    function init() {
+        console.log('🚀 Admin Auth initializing...');
         
-        // Check for existing session
-        const token = localStorage.getItem('adminToken');
-        if (token) {
-            console.log('Existing token found');
-            // Optionally verify token validity
-        }
+        // Find form using the correct ID from your HTML
+        const form = document.getElementById('adminLoginForm');
         
-        // Attach login handler
-        const loginForm = document.getElementById('loginForm');
-        if (loginForm) {
-            console.log('Login form found, attaching handler');
-            loginForm.addEventListener('submit', handleLogin);
+        if (form) {
+            console.log('✅ Admin login form found');
+            form.addEventListener('submit', handleLogin);
         } else {
-            console.error('Login form not found! Check if form id="loginForm" exists');
+            console.error('❌ Login form not found! Looking for id="adminLoginForm"');
+            showMessage('Page error: Login form not found. Please refresh.', 'warning');
+            return;
         }
         
         // Test API connection
-        fetch(`${API_URL}/health`)
+        console.log('🔍 Testing API connection...');
+        fetch(`${API_URL}/health`, { 
+            method: 'GET',
+            mode: 'cors',
+            headers: { 'Accept': 'application/json' }
+        })
             .then(res => {
                 if (res.ok) {
-                    console.log('✅ API connection successful');
-                } else {
-                    console.warn('⚠️ API returned status:', res.status);
+                    console.log('✅ API is reachable');
+                    return res.json();
                 }
+                throw new Error(`Status: ${res.status}`);
+            })
+            .then(data => {
+                console.log('✅ Health check:', data);
             })
             .catch(err => {
-                console.error('❌ Cannot reach API:', err.message);
-                showError('Cannot connect to server. The API might be down or the URL is incorrect.');
+                console.warn('⚠️ API health check failed:', err.message);
+                console.warn('Login might still work if health endpoint is not configured');
             });
-    });
+    }
+    
+    // Start when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
     
 })();
