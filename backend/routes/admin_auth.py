@@ -83,3 +83,14 @@ async def create_admin_user():
 async def change_password():
     """Change admin password"""
     return {"message": "Not implemented yet"}
+
+# Add this TEMPORARY test endpoint to your admin_auth.py
+@router.post("/admin/auth/test-login")
+async def test_login():
+    """Test endpoint to verify routing works"""
+    return {"message": "POST request received successfully"}
+
+@router.get("/admin/auth/test")
+async def test_get():
+    """Test GET endpoint"""
+    return {"message": "GET works"}
