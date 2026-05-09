@@ -5,7 +5,8 @@ Menu routes - public and admin endpoints
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Optional, Dict, Any
 
-from middleware import auth_required, get_current_admin_user
+from middleware import auth_required
+from middleware.admin_auth import admin_required
 from schemas.menu import (
     MenuItemCreate, MenuItemUpdate,
     MenuItemResponse, MenuListResponse
@@ -50,6 +51,20 @@ async def get_menu_by_category(category: str):
     }
 
 
+@router.get("/{item_id}", response_model=MenuItemResponse)
+async def get_menu_item(item_id: str):
+    """Get a single menu item by ID"""
+    item = await menu_service.get_item_by_id(item_id)
+    
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Menu item not found"
+        )
+    
+    return MenuItemResponse(**item)
+
+
 @router.get("/slug/{slug}", response_model=MenuItemResponse)
 async def get_menu_item_by_slug(slug: str):
     """Get a single menu item by slug"""
@@ -77,26 +92,12 @@ async def search_menu(query: str):
     }
 
 
-@router.get("/{item_id}", response_model=MenuItemResponse)
-async def get_menu_item(item_id: str):
-    """Get a single menu item by ID"""
-    item = await menu_service.get_item_by_id(item_id)
-    
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Menu item not found"
-        )
-    
-    return MenuItemResponse(**item)
-
-
 # ========== ADMIN ROUTES ==========
 
 @router.post("", response_model=MenuItemResponse, status_code=status.HTTP_201_CREATED)
 async def create_menu_item(
     request: MenuItemCreate,
-    admin: Dict[str, Any] = Depends(get_current_admin_user)
+    payload: Dict[str, Any] = Depends(admin_required)
 ):
     """Create a new menu item (admin only)"""
     item_data = request.model_dump()
@@ -115,7 +116,7 @@ async def create_menu_item(
 async def update_menu_item(
     item_id: str,
     request: MenuItemUpdate,
-    admin: Dict[str, Any] = Depends(get_current_admin_user)
+    payload: Dict[str, Any] = Depends(admin_required)
 ):
     """Update a menu item (admin only)"""
     update_data = request.model_dump(exclude_unset=True)
@@ -133,7 +134,7 @@ async def update_menu_item(
 @router.delete("/{item_id}")
 async def delete_menu_item(
     item_id: str,
-    admin: Dict[str, Any] = Depends(get_current_admin_user)
+    payload: Dict[str, Any] = Depends(admin_required)
 ):
     """Delete a menu item (admin only)"""
     success = await menu_service.delete_item(item_id)
