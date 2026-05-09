@@ -442,7 +442,6 @@ class AdminApiService {
 // Create singleton instance
 const adminApi = new AdminApiService();
 
-// ========== AUTH GUARD ==========
 function requireAdminAuth() {
     const token = localStorage.getItem('admin_token');
     
@@ -450,7 +449,7 @@ function requireAdminAuth() {
         window.location.href = 'index.html';
         return false;
     }
-    return true;
+    return true;  // Only check token, not adminData.email
 }
 
 // ========== LOGOUT ==========
