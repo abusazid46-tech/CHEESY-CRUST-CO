@@ -23,14 +23,15 @@ class AdminApiService {
                 }
             });
             
-            if (response.status === 401) {
-                // Admin token expired, try refresh
+            // Only redirect on 401 for protected endpoints
+            if (response.status === 401 && !endpoint.includes('/admin/auth/login')) {
+                // Try token refresh first
                 const refreshed = await this.refreshToken();
                 if (!refreshed) {
                     this.forceLogout();
                     throw new Error('Session expired');
                 }
-                // Retry request with new token
+                // Retry with new token
                 const retryResponse = await fetch(`${ADMIN_API_BASE}${endpoint}`, {
                     ...options,
                     headers: this.getHeaders()
@@ -40,11 +41,6 @@ class AdminApiService {
                     throw new Error('Session expired');
                 }
                 return await retryResponse.json();
-            }
-            
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.detail || `Request failed with status ${response.status}`);
             }
             
             return await response.json();
@@ -68,6 +64,8 @@ class AdminApiService {
                 body: JSON.stringify({ refresh_token: refreshToken })
             });
             
+            if (!response.ok) return false;
+            
             const data = await response.json();
             if (data.access_token) {
                 this.token = data.access_token;
@@ -87,9 +85,9 @@ class AdminApiService {
         localStorage.removeItem('admin_token');
         localStorage.removeItem('admin_refresh_token');
         localStorage.removeItem('admin_data');
-        localStorage.removeItem('admin_email_remembered');
         window.location.href = 'index.html';
     }
+}
     
     // ========== DASHBOARD ==========
     async getDashboard() {
