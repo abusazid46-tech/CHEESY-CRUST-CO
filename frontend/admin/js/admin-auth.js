@@ -4,7 +4,7 @@
     
     // ========== CONFIGURATION ==========
     // Change this to your actual Render backend URL
-    const API_URL = 'https://cheesy-crust-co.onrender.com/api';
+    const API_URL = 'https://cheesy-crust-api.onrender.com/api';
     console.log('🔧 API URL:', API_URL);
     
     // ========== UTILITY FUNCTIONS ==========
