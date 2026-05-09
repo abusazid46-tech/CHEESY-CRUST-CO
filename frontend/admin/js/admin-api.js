@@ -23,15 +23,12 @@ class AdminApiService {
                 }
             });
             
-            // Only redirect on 401 for protected endpoints
             if (response.status === 401 && !endpoint.includes('/admin/auth/login')) {
-                // Try token refresh first
                 const refreshed = await this.refreshToken();
                 if (!refreshed) {
                     this.forceLogout();
                     throw new Error('Session expired');
                 }
-                // Retry with new token
                 const retryResponse = await fetch(`${ADMIN_API_BASE}${endpoint}`, {
                     ...options,
                     headers: this.getHeaders()
@@ -448,9 +445,8 @@ const adminApi = new AdminApiService();
 // ========== AUTH GUARD ==========
 function requireAdminAuth() {
     const token = localStorage.getItem('admin_token');
-    const adminData = JSON.parse(localStorage.getItem('admin_data') || '{}');
     
-    if (!token || !adminData.email) {
+    if (!token) {
         window.location.href = 'index.html';
         return false;
     }
@@ -517,7 +513,6 @@ function timeAgo(dateString) {
 }
 
 function showAdminToast(message, type = 'success') {
-    // Remove existing toasts
     const existingToast = document.querySelector('.admin-toast');
     if (existingToast) existingToast.remove();
     
@@ -540,18 +535,11 @@ function showAdminToast(message, type = 'success') {
         max-width: 400px;
     `;
     
-    const icons = {
-        success: 'fa-check-circle',
-        error: 'fa-exclamation-triangle',
-        warning: 'fa-exclamation-circle',
-        info: 'fa-info-circle'
-    };
-    
     toast.innerHTML = `
         <div style="display: flex; align-items: center; gap: 10px;">
-            <i class="fas ${icons[type] || icons.info}" style="color: ${type === 'error' ? '#fff' : type === 'warning' ? '#0c0b09' : '#cda45e'};"></i>
+            <i class="fas fa-check-circle" style="color: #cda45e;"></i>
             <span>${message}</span>
-            <button onclick="this.parentElement.parentElement.remove()" 
+            <button onclick="this.closest('.admin-toast').remove()" 
                     style="background: none; border: none; color: #888; cursor: pointer; font-size: 1.2rem; margin-left: auto;">
                 &times;
             </button>
@@ -560,7 +548,6 @@ function showAdminToast(message, type = 'success') {
     
     document.body.appendChild(toast);
     
-    // Auto remove after 4 seconds
     setTimeout(() => {
         if (toast.parentElement) {
             toast.style.animation = 'slideOutRight 0.3s ease forwards';
@@ -569,7 +556,7 @@ function showAdminToast(message, type = 'success') {
     }, 4000);
 }
 
-// Add animation styles if not already in admin.css
+// Add animation styles
 if (!document.getElementById('admin-toast-styles')) {
     const style = document.createElement('style');
     style.id = 'admin-toast-styles';
@@ -586,18 +573,14 @@ if (!document.getElementById('admin-toast-styles')) {
     document.head.appendChild(style);
 }
 
-// ========== PAGE LOADER ==========
 function showPageLoader() {
     const loader = document.createElement('div');
     loader.id = 'page-loader';
     loader.style.cssText = `
-        position: fixed;
-        top: 0; left: 0;
+        position: fixed; top: 0; left: 0;
         width: 100%; height: 100%;
         background: rgba(12,11,9,0.8);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        display: flex; align-items: center; justify-content: center;
         z-index: 9998;
     `;
     loader.innerHTML = `
@@ -616,17 +599,13 @@ function hidePageLoader() {
     if (loader) loader.remove();
 }
 
-// ========== CONFIRMATION DIALOG ==========
 function showConfirmDialog(message, onConfirm, onCancel) {
     const overlay = document.createElement('div');
     overlay.style.cssText = `
-        position: fixed;
-        top: 0; left: 0;
+        position: fixed; top: 0; left: 0;
         width: 100%; height: 100%;
         background: rgba(0,0,0,0.7);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        display: flex; align-items: center; justify-content: center;
         z-index: 9999;
     `;
     
@@ -639,13 +618,9 @@ function showConfirmDialog(message, onConfirm, onCancel) {
             <p style="color: #fff; text-align: center; margin-bottom: 2rem; font-size: 1.1rem;">${message}</p>
             <div style="display: flex; gap: 12px;">
                 <button class="btn-cancel" style="flex: 1; background: transparent; border: 1px solid #3a352e; color: #bbb; 
-                        padding: 12px; border-radius: 12px; cursor: pointer; font-weight: 600;">
-                    Cancel
-                </button>
+                        padding: 12px; border-radius: 12px; cursor: pointer; font-weight: 600;">Cancel</button>
                 <button class="btn-confirm" style="flex: 1; background: linear-gradient(135deg, #cda45e, #b58d4a); 
-                        border: none; color: #0c0b09; padding: 12px; border-radius: 12px; cursor: pointer; font-weight: 700;">
-                    Confirm
-                </button>
+                        border: none; color: #0c0b09; padding: 12px; border-radius: 12px; cursor: pointer; font-weight: 700;">Confirm</button>
             </div>
         </div>
     `;
@@ -672,7 +647,6 @@ function showConfirmDialog(message, onConfirm, onCancel) {
 
 // ========== INITIALIZATION ==========
 document.addEventListener('DOMContentLoaded', () => {
-    // Check auth on protected pages
     const protectedPages = [
         'dashboard.html', 'orders.html', 'menu-management.html',
         'reservations.html', 'customers.html', 'reviews.html',
@@ -684,7 +658,6 @@ document.addEventListener('DOMContentLoaded', () => {
         requireAdminAuth();
     }
     
-    // Set today's date for date inputs
     const today = new Date().toISOString().split('T')[0];
     document.querySelectorAll('input[type="date"]').forEach(input => {
         if (!input.value) input.max = today;
