@@ -3,10 +3,10 @@ Cheesy Crust Co. - FastAPI Backend
 Main application entry point
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-from routes.admin_auth import router as admin_auth_router
 import logging
 
 from config.settings import settings
@@ -19,7 +19,8 @@ from routes import (
     payment_router,
     reservation_router,
     user_router,
-    admin_router
+    admin_router,
+    admin_auth_router  # Import directly
 )
 
 # Configure logging
@@ -36,17 +37,6 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Cheesy Crust Co. API...")
     await connect_to_mongo()
-    logger.info("Connected to MongoDB")
-    yield
-    # Shutdown
-    logger.info("Shutting down...")
-    await close_mongo_connection()
-    logger.info("Disconnected from MongoDB")
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Starting Cheesy Crust Co. API...")
-    await connect_to_mongo()
     
     # Initialize default admin
     from services.admin_service import admin_service
@@ -55,7 +45,10 @@ async def lifespan(app: FastAPI):
     logger.info("Connected to MongoDB")
     yield
     # Shutdown
+    logger.info("Shutting down...")
     await close_mongo_connection()
+    logger.info("Disconnected from MongoDB")
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -67,14 +60,29 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration
+# CORS configuration - MUST be before routes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# ADD THIS: Handle OPTIONS preflight requests
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(request: Request, rest_of_path: str):
+    """Handle CORS preflight requests"""
+    return JSONResponse(
+        content={"message": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
 
 # Include routers
 app.include_router(auth_router, prefix=f"{settings.API_PREFIX}/auth", tags=["Authentication"])
@@ -86,6 +94,7 @@ app.include_router(payment_router, prefix=f"{settings.API_PREFIX}/payment", tags
 app.include_router(reservation_router, prefix=f"{settings.API_PREFIX}/reservation", tags=["Reservation"])
 app.include_router(admin_router, prefix=f"{settings.API_PREFIX}/admin", tags=["Admin"])
 app.include_router(admin_auth_router, prefix=f"{settings.API_PREFIX}", tags=["Admin Auth"])
+
 
 @app.get("/")
 async def root():
