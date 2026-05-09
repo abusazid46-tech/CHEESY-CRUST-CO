@@ -140,7 +140,7 @@ async def lookup_reservations(phone: str):
 
 @router.get("/admin/all")
 async def get_all_reservations(
-    admin: Dict[str, Any] = Depends(get_current_admin_user),
+    admin: Dict[str, Any] = Depends(admin_required),
     date_filter: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
@@ -171,7 +171,7 @@ async def get_all_reservations(
 async def update_reservation_status(
     reservation_id: str,
     reservation_status: str = Query(..., alias="status"),
-    admin: Dict[str, Any] = Depends(get_current_admin_user)
+    payload: Dict[str, Any] = Depends(admin_required)  # ← FIXED: was get_current_admin_user
 ):
     """Update reservation status (admin only)"""
     try:
