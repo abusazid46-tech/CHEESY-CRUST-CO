@@ -1,4 +1,4 @@
-sservices:
+services:
   - type: web
     name: cheesy-crust-api
     runtime: python
@@ -12,6 +12,12 @@ sservices:
         sync: false
       - key: JWT_SECRET
         sync: false
+      - key: ADMIN_JWT_SECRET
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
       - key: RAZORPAY_KEY_ID
         sync: false
       - key: RAZORPAY_KEY_SECRET
@@ -22,3 +28,7 @@ sservices:
         sync: false
       - key: TWILIO_VERIFY_SERVICE_SID
         sync: false
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: false

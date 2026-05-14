@@ -84,8 +84,13 @@ async function updateResStatus(resId, status) {
 }
 
 function renderResPagination(total, page, totalPages) {
-    const div = document.createElement('div');
-    div.className = 'd-flex justify-content-between mt-3';
+    let div = document.getElementById('reservationPagination');
+    if (!div) {
+        div = document.createElement('div');
+        div.id = 'reservationPagination';
+        div.className = 'd-flex justify-content-between mt-3';
+        document.querySelector('.chart-container').appendChild(div);
+    }
     div.innerHTML = `
         <span class="text-muted">Page ${page} of ${totalPages}</span>
         <div>
@@ -93,7 +98,69 @@ function renderResPagination(total, page, totalPages) {
             <button class="btn-outline" onclick="loadReservations(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>Next</button>
         </div>
     `;
-    document.querySelector('.chart-container').appendChild(div);
+}
+
+async function viewReservationDetail(resId) {
+    try {
+        const data = await adminApi.getReservationById(resId);
+        const res = data.reservation;
+        if (!res) return;
+
+        let modalEl = document.getElementById('reservationDetailModal');
+        if (!modalEl) {
+            modalEl = document.createElement('div');
+            modalEl.id = 'reservationDetailModal';
+            modalEl.className = 'modal fade';
+            modalEl.innerHTML = `
+                <div class="modal-dialog modal-lg modal-dialog-centered">
+                    <div class="modal-content" style="background:#1a1814;color:#fff;border:1px solid rgba(205,164,94,0.3);">
+                        <div class="modal-header" style="border-color:#3a352e;">
+                            <h5 class="modal-title" style="color:var(--gold);">Reservation Details</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" id="reservationDetailContent"></div>
+                    </div>
+                </div>`;
+            document.body.appendChild(modalEl);
+        }
+
+        const items = res.preorder_items || [];
+        document.getElementById('reservationDetailContent').innerHTML = `
+            <div class="row">
+                <div class="col-md-6">
+                    <p><strong>Name:</strong> ${res.name}</p>
+                    <p><strong>Phone:</strong> ${res.phone}</p>
+                    <p><strong>Date:</strong> ${res.date}</p>
+                    <p><strong>Time:</strong> ${res.time}</p>
+                </div>
+                <div class="col-md-6">
+                    <p><strong>Guests:</strong> ${res.guests}</p>
+                    <p><strong>Status:</strong> ${res.status}</p>
+                    <p><strong>Payment:</strong> ${res.payment_status || 'pending'}</p>
+                    <p><strong>Requests:</strong> ${res.special_requests || 'None'}</p>
+                </div>
+            </div>
+            <hr style="border-color:#3a352e;">
+            <h6 style="color:var(--gold);">Pre-order Items</h6>
+            ${items.length ? `
+                <table class="admin-table">
+                    <thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr></thead>
+                    <tbody>${items.map(item => `
+                        <tr>
+                            <td>${item.name}</td>
+                            <td>${item.quantity}</td>
+                            <td>${formatCurrency(item.price)}</td>
+                            <td>${formatCurrency(item.price * item.quantity)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>` : '<p class="text-muted">No pre-order items.</p>'}
+            <div class="text-end mt-3"><strong style="color:var(--gold);">Total: ${formatCurrency(res.preorder_total || 0)}</strong></div>
+        `;
+
+        new bootstrap.Modal(modalEl).show();
+    } catch (error) {
+        showAdminToast('Failed to load reservation details', 'error');
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => loadReservations());

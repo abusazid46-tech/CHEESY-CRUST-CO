@@ -2,7 +2,11 @@
 (function() {
     'use strict';
     
-    const API_BASE = 'https://cheesy-crust-api.onrender.com';
+    const API_BASE = window.ADMIN_API_ORIGIN || (
+        ['localhost', '127.0.0.1'].includes(window.location.hostname)
+            ? 'http://localhost:8000'
+            : 'https://cheesy-crust-api.onrender.com'
+    );
     
     // Show message helper
     function showMessage(message, type = 'danger') {
@@ -66,8 +70,6 @@
     // Login function
     async function handleLogin(event) {
         event.preventDefault();
-        console.log('=== Login Attempt Started ===');
-        
         const emailInput = document.getElementById('adminEmail');
         const passwordInput = document.getElementById('adminPassword');
         const rememberCheckbox = document.getElementById('rememberMe');
@@ -113,9 +115,6 @@
         
         try {
             const loginUrl = `${API_BASE}/api/v1/admin/auth/login`;
-            console.log('POST:', loginUrl);
-            console.log('Body:', { email, password: '***' });
-            
             const response = await fetch(loginUrl, {
                 method: 'POST',
                 headers: {
@@ -124,8 +123,6 @@
                 },
                 body: JSON.stringify({ email, password })
             });
-            
-            console.log('Status:', response.status);
             
             let data;
             try {
@@ -137,8 +134,6 @@
                 return;
             }
             
-            console.log('Response:', data);
-            
             // Check success
             if (response.ok && data.success === true && data.access_token) {
                 // STORE TOKENS WITH CORRECT KEYS
@@ -148,11 +143,6 @@
                 // Store admin data
                 const adminData = data.admin || {};
                 localStorage.setItem('admin_data', JSON.stringify(adminData));
-                
-                // Verify storage
-                const storedToken = localStorage.getItem('admin_token');
-                console.log('Token stored successfully:', !!storedToken);
-                console.log('Token preview:', storedToken?.substring(0, 30) + '...');
                 
                 showMessage('Login successful! Redirecting to dashboard...', 'success');
                 
@@ -187,9 +177,6 @@
     const form = document.getElementById('adminLoginForm');
     if (form) {
         form.addEventListener('submit', handleLogin);
-        console.log('Login form initialized and ready');
-    } else {
-        console.error('Login form not found! Check HTML for id="adminLoginForm"');
     }
     
 })();

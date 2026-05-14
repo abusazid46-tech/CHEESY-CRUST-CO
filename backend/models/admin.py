@@ -7,6 +7,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from bson import ObjectId
 import hashlib
+import hmac
 import secrets
 
 
@@ -63,7 +64,7 @@ class Admin(BaseModel):
     def verify_password(password: str, salt: str, password_hash: str) -> bool:
         """Verify password against stored hash"""
         new_hash, _ = Admin.hash_password(password, salt)
-        return new_hash == password_hash
+        return hmac.compare_digest(new_hash, password_hash)
     
     @classmethod
     def create_admin(cls, email: str, password: str, name: str, role: str = "admin"):

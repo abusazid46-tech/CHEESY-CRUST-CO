@@ -1,5 +1,9 @@
 // Admin API Service - Complete & Fixed
-const ADMIN_API_BASE = 'https://cheesy-crust-api.onrender.com/api/v1';
+const ADMIN_API_BASE = window.ADMIN_API_BASE || (
+    ['localhost', '127.0.0.1'].includes(window.location.hostname)
+        ? 'http://localhost:8000/api/v1'
+        : 'https://cheesy-crust-api.onrender.com/api/v1'
+);
 
 class AdminApiService {
     constructor() {
@@ -37,10 +41,14 @@ class AdminApiService {
                     this.forceLogout();
                     throw new Error('Session expired');
                 }
-                return await retryResponse.json();
+                const retryData = await retryResponse.json();
+                if (!retryResponse.ok) throw new Error(retryData.detail || retryData.message || 'Request failed');
+                return retryData;
             }
             
-            return await response.json();
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || data.message || 'Request failed');
+            return data;
         } catch (error) {
             if (error.message === 'Session expired') throw error;
             console.error('API Error:', error);
@@ -89,7 +97,7 @@ class AdminApiService {
         if (status) url += `&status=${status}`;
         return this.request(url);
     }
-    async getOrderById(orderId) { return this.request(`/orders/${orderId}`); }
+    async getOrderById(orderId) { return this.request(`/orders/admin/${orderId}`); }
     async updateOrderStatus(orderId, status) {
         return this.request(`/orders/admin/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
     }

@@ -87,10 +87,7 @@ async function updateOrderStatus(orderId, status) {
 // View order detail
 async function viewOrderDetail(orderId) {
     try {
-        const response = await fetch(`${ADMIN_API_BASE}/orders/${orderId}`, {
-            headers: adminApi.getHeaders()
-        });
-        const data = await response.json();
+        const data = await adminApi.getOrderById(orderId);
         
         if (data.success && data.order) {
             const order = data.order;

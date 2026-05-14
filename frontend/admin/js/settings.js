@@ -1,8 +1,15 @@
 // Settings Logic
 requireAdminAuth();
 
-function loadSettings() {
-    const settings = JSON.parse(localStorage.getItem('admin_settings') || '{}');
+async function loadSettings() {
+    let settings = JSON.parse(localStorage.getItem('admin_settings') || '{}');
+    try {
+        const response = await adminApi.getSettings();
+        settings = response.settings || settings;
+        localStorage.setItem('admin_settings', JSON.stringify(settings));
+    } catch (error) {
+        console.warn('Using local settings fallback:', error.message);
+    }
     
     document.getElementById('restaurantName').value = settings.restaurantName || 'Cheesy Crust Co.';
     document.getElementById('restaurantPhone').value = settings.restaurantPhone || '+917002012345';
@@ -16,7 +23,7 @@ function loadSettings() {
     document.getElementById('adminPhones').value = settings.adminPhones || '+917002012345';
 }
 
-function saveAllSettings() {
+async function saveAllSettings() {
     const settings = {
         restaurantName: document.getElementById('restaurantName').value,
         restaurantPhone: document.getElementById('restaurantPhone').value,
@@ -31,8 +38,15 @@ function saveAllSettings() {
         updatedAt: new Date().toISOString()
     };
     
-    localStorage.setItem('admin_settings', JSON.stringify(settings));
-    showAdminToast('Settings saved successfully!');
+    try {
+        const response = await adminApi.updateSettings(settings);
+        const saved = response.settings || settings;
+        localStorage.setItem('admin_settings', JSON.stringify(saved));
+        showAdminToast('Settings saved successfully!');
+    } catch (error) {
+        localStorage.setItem('admin_settings', JSON.stringify(settings));
+        showAdminToast('Settings saved locally. Server update failed.', 'warning');
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => loadSettings());

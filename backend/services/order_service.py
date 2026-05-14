@@ -72,12 +72,6 @@ class OrderService:
             result = await collections.orders.insert_one(order.model_dump(by_alias=True))
             order.id = result.inserted_id
             
-            # Clear user's cart after order creation
-            await collections.carts.update_one(
-                {"user_id": ObjectId(user_id)},
-                {"$set": {"items": [], "total": 0.0, "updated_at": datetime.utcnow()}}
-            )
-            
             return order
         except Exception as e:
             print(f"Order creation error: {e}")

@@ -7,6 +7,7 @@ import hmac
 import hashlib
 import logging
 from typing import Optional, Tuple
+from datetime import datetime
 
 from config.settings import settings
 from database import collections
@@ -112,22 +113,28 @@ class PaymentService:
                 "razorpay_payment_id": razorpay_payment_id,
                 "razorpay_signature": razorpay_signature,
                 "status": "paid",
-                "verified_at": __import__("datetime").datetime.utcnow()
+                "verified_at": datetime.utcnow()
             }}
         )
         
         # Update order payment status
         if order_id:
             from bson import ObjectId
+            order = await collections.orders.find_one({"_id": ObjectId(order_id)})
             await collections.orders.update_one(
                 {"_id": ObjectId(order_id)},
                 {"$set": {
                     "payment_status": PaymentStatus.PAID,
                     "payment_id": razorpay_payment_id,
                     "status": "confirmed",
-                    "updated_at": __import__("datetime").datetime.utcnow()
+                    "updated_at": datetime.utcnow()
                 }}
             )
+            if order and order.get("user_id"):
+                await collections.carts.update_one(
+                    {"user_id": order["user_id"]},
+                    {"$set": {"items": [], "total": 0.0, "updated_at": datetime.utcnow()}}
+                )
         
         # Update reservation payment status
         if reservation_id:
@@ -138,7 +145,7 @@ class PaymentService:
                     "payment_status": PaymentStatus.PAID,
                     "payment_id": razorpay_payment_id,
                     "status": "confirmed",
-                    "updated_at": __import__("datetime").datetime.utcnow()
+                    "updated_at": datetime.utcnow()
                 }}
             )
         
@@ -166,7 +173,7 @@ class PaymentService:
                     "status": "refunded",
                     "refund_id": refund["id"],
                     "refund_amount": amount,
-                    "refunded_at": __import__("datetime").datetime.utcnow()
+                    "refunded_at": datetime.utcnow()
                 }}
             )
             

@@ -86,6 +86,9 @@ async def create_indexes():
         await db.reviews.create_index("item_id")
         await db.reviews.create_index("user_id")
         await db.reviews.create_index("order_id")
+        await db.offers.create_index("is_active")
+        await db.offers.create_index([("created_at", DESCENDING)])
+        await db.notifications.create_index([("created_at", DESCENDING)])
         
         logger.info("Database indexes created successfully")
         
@@ -141,5 +144,17 @@ class Collections:
     @property
     def admin_sessions(self):
         return db.admin_sessions
+
+    @property
+    def offers(self):
+        return db.offers
+
+    @property
+    def settings(self):
+        return db.settings
+
+    @property
+    def notifications(self):
+        return db.notifications
 
 collections = Collections()

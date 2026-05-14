@@ -159,6 +159,26 @@ async def update_order_status(
     }
 
 
+@router.get("/admin/{order_id}")
+async def get_admin_order(
+    order_id: str,
+    payload: Dict[str, Any] = Depends(admin_required)
+):
+    """Get any order by ID (admin only)"""
+    order = await order_service.get_order_by_id(order_id)
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+    return {
+        "success": True,
+        "order": order
+    }
+
+
 @router.get("/{order_id}")
 async def get_order(
     order_id: str,

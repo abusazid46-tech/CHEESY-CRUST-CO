@@ -51,18 +51,10 @@ async def get_menu_by_category(category: str):
     }
 
 
-@router.get("/{item_id}", response_model=MenuItemResponse)
-async def get_menu_item(item_id: str):
-    """Get a single menu item by ID"""
-    item = await menu_service.get_item_by_id(item_id)
-    
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Menu item not found"
-        )
-    
-    return MenuItemResponse(**item)
+@router.get("/categories")
+async def get_menu_categories():
+    """Get all menu categories"""
+    return {"success": True, "categories": await menu_service.get_categories()}
 
 
 @router.get("/slug/{slug}", response_model=MenuItemResponse)
@@ -90,6 +82,20 @@ async def search_menu(query: str):
         "items": items,
         "total": len(items)
     }
+
+
+@router.get("/{item_id}", response_model=MenuItemResponse)
+async def get_menu_item(item_id: str):
+    """Get a single menu item by ID"""
+    item = await menu_service.get_item_by_id(item_id)
+
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Menu item not found"
+        )
+
+    return MenuItemResponse(**item)
 
 
 # ========== ADMIN ROUTES ==========
@@ -128,6 +134,27 @@ async def update_menu_item(
             detail="Menu item not found or update failed"
         )
     
+    return MenuItemResponse(**item)
+
+
+@router.patch("/{item_id}/toggle-availability", response_model=MenuItemResponse)
+async def toggle_menu_item_availability(
+    item_id: str,
+    payload: Dict[str, Any] = Depends(admin_required)
+):
+    """Toggle menu item availability (admin only)"""
+    current = await menu_service.get_item_by_id(item_id)
+    if not current:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Menu item not found"
+        )
+    item = await menu_service.update_item(item_id, {"is_available": not current.get("is_available", True)})
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to update menu item"
+        )
     return MenuItemResponse(**item)
 
 
