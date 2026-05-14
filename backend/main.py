@@ -15,6 +15,7 @@ from routes import (
     cart_router,
     order_router,
     payment_router,
+    reservation_router,
     user_router,
     admin_router,
     admin_auth_router
