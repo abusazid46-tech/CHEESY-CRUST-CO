@@ -186,7 +186,8 @@ async function processCheckout(orderType, address) {
         order_id: paymentOrder.razorpay_order_id,
         prefill: {
             name: localStorage.getItem(STORAGE_KEYS.userName) || 'Customer',
-            contact: localStorage.getItem(STORAGE_KEYS.userPhone) || ''
+            email: localStorage.getItem(STORAGE_KEYS.userEmail) || '',
+            contact: String(localStorage.getItem(STORAGE_KEYS.userPhone) || '').replace(/\D/g, '').slice(-10)
         },
         theme: { color: '#cda45e' },
         handler: async paymentResponse => {
@@ -205,6 +206,10 @@ async function processCheckout(orderType, address) {
         modal: {
             ondismiss: () => showToast('Payment cancelled. Your cart was not cleared.', 'info')
         }
+    });
+    rzp.on('payment.failed', response => {
+        const description = response?.error?.description || 'Payment could not be completed. Try another UPI app or card.';
+        showToast(description, 'error');
     });
     rzp.open();
 }
