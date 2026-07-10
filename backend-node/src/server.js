@@ -103,7 +103,9 @@ function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
 function verifyPassword(password, salt, storedHash) {
   if (!salt || !storedHash) return false;
   const { hash } = hashPassword(password, salt);
-  return safeCompare(hash, storedHash);
+  if (safeCompare(hash, storedHash)) return true;
+  const legacyHash = crypto.createHash("sha256").update(String(password) + salt).digest("hex");
+  return safeCompare(legacyHash, storedHash);
 }
 
 function safeCompare(left, right) {
