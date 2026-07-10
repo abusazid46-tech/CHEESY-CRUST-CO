@@ -332,11 +332,15 @@ function normalizeCartItem(item) {
 }
 
 function localCart() {
-    return getStoredJson('local_cart', []);
+    return getStoredJson('local_cart', []).filter(item => isBackendItemId(item.item_id || item.id));
 }
 
 function saveLocalCart(items) {
     localStorage.setItem('local_cart', JSON.stringify(items));
+}
+
+function isBackendItemId(value) {
+    return /^\d+$/.test(String(value || '')) || /^[a-f\d]{24}$/i.test(String(value || ''));
 }
 
 function showToast(message, type = 'success') {

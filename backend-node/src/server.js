@@ -26,6 +26,24 @@ const settings = {
   adminPassword: process.env.ADMIN_PASSWORD || "Admin@123456"
 };
 
+const defaultMenuItems = [
+  { name: "Golden Cheese Croissant", category: "breakfast", price: 320, description: "Flaky layers, four artisan cheeses", image_url: "https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400" },
+  { name: "Sunrise Breakfast Pizza", category: "breakfast", price: 450, description: "Eggs, bacon, mozzarella blend", image_url: "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=400" },
+  { name: "Pancake Stack w/ Honey", category: "breakfast", price: 290, description: "Maple syrup and gold butter", image_url: "https://recipesblob.oetker.co.uk/assets/4acbec1ea07846acb27a8abc3c4d0738/1680x580/american-pancakes-v1.webp?w=400" },
+  { name: "Belgian Waffle", category: "breakfast", price: 310, description: "Maple syrup, fresh berries", image_url: "https://images.unsplash.com/photo-1562376552-0d160a2f238d?w=400" },
+  { name: "Truffle Mushroom Pasta", category: "lunch", price: 540, description: "Creamy parmesan, truffle oil", image_url: "https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=400" },
+  { name: "Spicy Peri-Peri Chicken", category: "lunch", price: 620, description: "Grilled with herbed rice", image_url: "https://images.unsplash.com/photo-1587593810167-a84920ea0781?w=400" },
+  { name: "Margherita Classica", category: "lunch", price: 480, description: "San Marzano, basil, gold olive oil", image_url: "https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=400" },
+  { name: "Classic Cheeseburger", category: "lunch", price: 380, description: "Angus beef, aged cheddar", image_url: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400" },
+  { name: "Garlic Bread Supreme", category: "lunch", price: 210, description: "Cheese and herbs butter", image_url: "https://images.unsplash.com/photo-1573140400632-3a160b144b5c?w=400" },
+  { name: "Cheesy Crust Signature", category: "dinner", price: 890, description: "Double cheese, pepperoni, jalapenos", image_url: "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=400" },
+  { name: "Filet Mignon Steak", category: "dinner", price: 1490, description: "Garlic butter and mashed potatoes", image_url: "https://images.unsplash.com/photo-1544025162-d76694265947?w=400" },
+  { name: "Seafood Risotto", category: "dinner", price: 1120, description: "Prawns, squid, saffron risotto", image_url: "https://images.unsplash.com/photo-1534080564583-6be75777b70a?w=400" },
+  { name: "Grilled Chicken Steak", category: "dinner", price: 720, description: "Mashed potatoes and veggies", image_url: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400" },
+  { name: "Pepperoni Pizza", category: "dinner", price: 560, description: "Spicy pepperoni, mozzarella", image_url: "https://images.unsplash.com/photo-1628840042765-356cda07504e?w=400" },
+  { name: "Tiramisu", category: "dinner", price: 290, description: "Classic Italian dessert", image_url: "https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=400" }
+];
+
 const corsOrigins = (process.env.CORS_ORIGINS || "https://whitesmoke-jay-438498.hostingersite.com,https://cheesy-crust-co-7w5c.vercel.app,http://localhost:5500,http://127.0.0.1:5500")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
 
@@ -325,6 +343,18 @@ async function ensureAdmin() {
     "INSERT INTO admins (email,name,password_hash,salt,role,is_active) VALUES (?,?,?,?,?,1)",
     [settings.adminEmail, "Super Admin", hash, salt, "super_admin"]
   );
+}
+
+async function ensureDefaultMenu() {
+  const [[count]] = await db.query("SELECT COUNT(*) AS total FROM menu_items");
+  if (Number(count.total) > 0) return;
+  const rating = JSON.stringify({ avg: 0, count: 0 });
+  for (const item of defaultMenuItems) {
+    await db.execute(
+      "INSERT INTO menu_items (name,slug,category,price,description,image_url,is_available,rating) VALUES (?,?,?,?,?,?,1,?)",
+      [item.name, slugify(item.name), item.category, item.price, item.description, item.image_url, rating]
+    );
+  }
 }
 
 function slugify(name) {
@@ -842,6 +872,7 @@ async function start() {
   razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
   await migrate();
   await ensureAdmin();
+  await ensureDefaultMenu();
   app.listen(PORT, () => console.log(`Cheesy Crust MySQL API listening on ${PORT}`));
 }
 

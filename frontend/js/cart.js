@@ -39,7 +39,7 @@ async function syncLocalCartToBackend() {
     if (!localItems.length) return;
 
     for (const item of localItems) {
-        if (!isMongoId(item.id)) continue;
+        if (!isBackendItemId(item.id)) continue;
         try {
             await api.addToCart(item.id, Number(item.quantity || 1));
         } catch {
@@ -100,7 +100,7 @@ async function updateQuantity(id, delta) {
     item.quantity = newQty;
     saveLocalCart(cartItems);
 
-    if (isAuthenticated() && isMongoId(id)) {
+    if (isAuthenticated() && isBackendItemId(id)) {
         try {
             await api.updateCartItem(id, newQty);
         } catch (error) {
@@ -116,7 +116,7 @@ async function removeItem(id) {
     cartItems = cartItems.filter(i => i.id !== id);
     saveLocalCart(cartItems);
 
-    if (isAuthenticated() && isMongoId(id)) {
+    if (isAuthenticated() && isBackendItemId(id)) {
         try {
             await api.removeFromCart(id);
         } catch (error) {
@@ -281,6 +281,11 @@ function setupCheckoutAuthHandlers() {
             await api.login(identifier, password);
             bootstrap.Modal.getInstance(document.getElementById('checkoutAuthModal')).hide();
             showToast('Signed in successfully.');
+            await loadCart();
+            if (!cartItems.length) {
+                showToast('These cart items are no longer available. Please add them again from the menu.', 'error');
+                return;
+            }
             await processCheckout(document.getElementById('orderType').value, document.getElementById('deliveryAddress')?.value.trim());
         } catch (error) {
             message.innerText = error.message;
@@ -292,10 +297,6 @@ function setupCheckoutAuthHandlers() {
 
 function getDeliveryFee() {
     return document.getElementById('orderType')?.value === 'delivery' ? 40 : 0;
-}
-
-function isMongoId(value) {
-    return /^[a-f\d]{24}$/i.test(String(value || ''));
 }
 
 function escapeJs(value) {

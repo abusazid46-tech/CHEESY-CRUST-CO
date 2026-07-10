@@ -315,7 +315,7 @@ function attachCartListeners() {
             updateLocalCartCount();
             showToast(`${name} added to cart!`);
 
-            if (isAuthenticated() && /^[a-f\d]{24}$/i.test(id)) {
+            if (isAuthenticated() && isBackendItemId(id)) {
                 try {
                     await api.addToCart(id);
                 } catch (error) {
