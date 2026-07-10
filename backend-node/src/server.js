@@ -1,6 +1,8 @@
 require("dotenv").config();
 
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -912,6 +914,21 @@ app.delete(`${API_PREFIX}/admin/reviews/:reviewId`, adminRequired, asyncRoute(as
   await collections.reviews.deleteOne({ _id: objectId(req.params.reviewId) });
   res.json({ success: true, message: "Review deleted" });
 }));
+
+const staticDir = [
+  process.env.STATIC_DIR,
+  path.join(__dirname, "..", "frontend"),
+  path.join(__dirname, "..", "..", "frontend"),
+  path.join(__dirname, "..", "..", "public_html", "frontend")
+].filter(Boolean).find((candidate) => fs.existsSync(path.join(candidate, "index.html")));
+
+if (staticDir) {
+  app.use(express.static(staticDir));
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith(API_PREFIX)) return next();
+    return res.sendFile(path.join(staticDir, "index.html"));
+  });
+}
 
 app.use((req, res) => res.status(404).json({ detail: "Not found" }));
 
