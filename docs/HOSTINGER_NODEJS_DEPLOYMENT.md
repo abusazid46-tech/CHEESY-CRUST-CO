@@ -27,7 +27,7 @@ ADMIN_PASSWORD=
 RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
 RAZORPAY_WEBHOOK_SECRET=
-CORS_ORIGINS=https://your-frontend-domain.com,https://api.your-domain.com
+CORS_ORIGINS=https://whitesmoke-jay-438498.hostingersite.com
 ```
 
 ## Install And Start Over SSH
@@ -46,8 +46,8 @@ Point the frontend API base to the Hostinger Node API:
 
 ```html
 <script>
-  window.API_BASE_URL = "https://api.your-domain.com/api/v1";
-  window.ADMIN_API_BASE = "https://api.your-domain.com/api/v1";
+  window.API_BASE_URL = "https://whitesmoke-jay-438498.hostingersite.com/api/v1";
+  window.ADMIN_API_BASE = "https://whitesmoke-jay-438498.hostingersite.com/api/v1";
 </script>
 ```
 
@@ -58,15 +58,15 @@ Place this before `frontend/js/api.js` and before `frontend/admin/js/admin-api.j
 In Razorpay Dashboard:
 
 - Use the live key ID and secret in Hostinger env.
-- Webhook URL: `https://api.your-domain.com/api/v1/payment/webhook`
+- Webhook URL: `https://whitesmoke-jay-438498.hostingersite.com/api/v1/payment/webhook`
 - Webhook secret: same value as `RAZORPAY_WEBHOOK_SECRET`
 - Subscribe to payment captured, payment failed, and refund events.
 
 ## Smoke Checks
 
 ```bash
-curl https://api.your-domain.com/health
-curl https://api.your-domain.com/api/v1/menu
+curl https://whitesmoke-jay-438498.hostingersite.com/health
+curl https://whitesmoke-jay-438498.hostingersite.com/api/v1/menu
 ```
 
 Expected health response includes:

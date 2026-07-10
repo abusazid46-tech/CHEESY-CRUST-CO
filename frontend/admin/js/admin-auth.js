@@ -5,7 +5,7 @@
     const API_BASE = window.ADMIN_API_ORIGIN || (
         ['localhost', '127.0.0.1'].includes(window.location.hostname)
             ? 'http://localhost:8000'
-            : window.location.origin
+            : 'https://whitesmoke-jay-438498.hostingersite.com'
     );
     
     // Show message helper

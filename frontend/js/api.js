@@ -2,7 +2,7 @@
 const API_BASE_URL = window.API_BASE_URL || (
     ['localhost', '127.0.0.1'].includes(window.location.hostname)
         ? 'http://localhost:8000/api/v1'
-        : `${window.location.origin}/api/v1`
+        : 'https://whitesmoke-jay-438498.hostingersite.com/api/v1'
 );
 
 const STORAGE_KEYS = {
