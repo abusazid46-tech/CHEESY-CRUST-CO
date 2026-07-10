@@ -8,21 +8,14 @@ const cors = require("cors");
 const helmet = require("helmet");
 const jwt = require("jsonwebtoken");
 const morgan = require("morgan");
+const mysql = require("mysql2/promise");
 const Razorpay = require("razorpay");
-const { MongoClient, ObjectId } = require("mongodb");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const API_PREFIX = process.env.API_PREFIX || "/api/v1";
 
-const requiredEnv = ["MONGODB_URI", "JWT_SECRET", "ADMIN_JWT_SECRET", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"];
-const missingEnv = requiredEnv.filter((key) => !process.env[key]);
-if (missingEnv.length) {
-  console.warn(`Missing env values: ${missingEnv.join(", ")}`);
-}
-
 const settings = {
-  dbName: process.env.MONGODB_DB_NAME || "cheesy_crust",
   restaurantName: process.env.RESTAURANT_NAME || "Cheesy Crust Co.",
   deliveryFee: Number(process.env.DELIVERY_FEE || 40),
   freeDeliveryThreshold: Number(process.env.FREE_DELIVERY_THRESHOLD || 500),
@@ -33,58 +26,20 @@ const settings = {
   adminPassword: process.env.ADMIN_PASSWORD || "Admin@123456"
 };
 
-const corsOrigins = (process.env.CORS_ORIGINS || "http://localhost:5500,http://localhost:8000,http://127.0.0.1:5500,http://127.0.0.1:8000")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
-function isAllowedOrigin(origin) {
-  if (!origin) return true;
-  if (corsOrigins.includes(origin)) return true;
-  try {
-    const { hostname } = new URL(origin);
-    return hostname === "whitesmoke-jay-438498.hostingersite.com" ||
-      hostname === "localhost" ||
-      hostname === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
-
-app.use(helmet());
-app.use(cors({
-  origin(origin, callback) {
-    if (isAllowedOrigin(origin)) return callback(null, true);
-    return callback(new Error("Origin not allowed by CORS"));
-  },
-  credentials: true
-}));
-app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
-
-app.post(`${API_PREFIX}/payment/webhook`, express.raw({ type: "*/*" }), paymentWebhook);
-app.use(express.json({ limit: "1mb" }));
+const corsOrigins = (process.env.CORS_ORIGINS || "https://whitesmoke-jay-438498.hostingersite.com,http://localhost:5500,http://127.0.0.1:5500")
+  .split(",").map((origin) => origin.trim()).filter(Boolean);
 
 let db;
-let collections;
 let razorpay;
 
-function now() {
+function nowSql() {
   return new Date();
 }
 
-function objectId(id) {
-  if (!ObjectId.isValid(String(id || ""))) return null;
-  return new ObjectId(String(id));
-}
-
-function serialize(value) {
-  if (Array.isArray(value)) return value.map(serialize);
-  if (value && typeof value === "object") {
-    if (value instanceof ObjectId) return value.toString();
-    if (value instanceof Date) return value.toISOString();
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, serialize(item)]));
-  }
-  return value;
+function toJson(value, fallback) {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return fallback; }
 }
 
 function normalizePhone(phone) {
@@ -92,7 +47,7 @@ function normalizePhone(phone) {
   if (digits.length < 10 || digits.length > 15) throw new Error("Invalid phone number");
   if (digits.length === 10) return `+91${digits}`;
   if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
-  return String(phone).startsWith("+") ? `+${digits}` : `+${digits}`;
+  return `+${digits}`;
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
@@ -100,38 +55,32 @@ function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   return { hash, salt };
 }
 
+function safeCompare(left, right) {
+  const a = Buffer.from(String(left || ""));
+  const b = Buffer.from(String(right || ""));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 function verifyPassword(password, salt, storedHash) {
   if (!salt || !storedHash) return false;
   const { hash } = hashPassword(password, salt);
   if (safeCompare(hash, storedHash)) return true;
-  const legacyHash = crypto.createHash("sha256").update(String(password) + salt).digest("hex");
-  return safeCompare(legacyHash, storedHash);
+  return safeCompare(crypto.createHash("sha256").update(String(password) + salt).digest("hex"), storedHash);
 }
 
-function safeCompare(left, right) {
-  const leftBuffer = Buffer.from(String(left || ""));
-  const rightBuffer = Buffer.from(String(right || ""));
-  if (leftBuffer.length !== rightBuffer.length) return false;
-  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+function idString(value) {
+  return String(value);
 }
 
-function createToken(payload, secret, expiresIn) {
-  return jwt.sign(payload, secret, { expiresIn });
-}
-
-function tokenPairForUser(user) {
-  const payload = {
-    sub: user._id.toString(),
-    phone: user.phone,
-    email: user.email,
-    is_admin: Boolean(user.is_admin)
-  };
+function userToken(user) {
+  const payload = { sub: idString(user.id), phone: user.phone, email: user.email, is_admin: Boolean(user.is_admin), type: "access" };
+  const refreshPayload = { ...payload, type: "refresh" };
   return {
-    access_token: createToken({ ...payload, type: "access" }, process.env.JWT_SECRET, settings.jwtExpiresIn),
-    refresh_token: createToken({ ...payload, type: "refresh" }, process.env.JWT_SECRET, settings.refreshExpiresIn),
+    access_token: jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: settings.jwtExpiresIn }),
+    refresh_token: jwt.sign(refreshPayload, process.env.JWT_SECRET, { expiresIn: settings.refreshExpiresIn }),
     token_type: "bearer",
     expires_in: 7 * 24 * 60 * 60,
-    user_id: user._id.toString(),
+    user_id: idString(user.id),
     phone: user.phone,
     email: user.email,
     name: user.name,
@@ -139,37 +88,58 @@ function tokenPairForUser(user) {
   };
 }
 
-function tokenPairForAdmin(admin) {
-  const payload = {
-    sub: admin._id.toString(),
+function adminPublic(admin) {
+  return {
+    id: idString(admin.id),
     email: admin.email,
     name: admin.name,
     role: admin.role || "admin",
-    type: "admin"
-  };
-  return {
-    access_token: createToken(payload, process.env.ADMIN_JWT_SECRET, "24h"),
-    refresh_token: createToken(payload, process.env.ADMIN_JWT_SECRET, "7d"),
-    token_type: "bearer",
-    expires_in: 86400,
-    admin: publicAdmin(admin)
+    is_active: Boolean(admin.is_active),
+    last_login: admin.last_login,
+    created_at: admin.created_at
   };
 }
 
-function publicAdmin(admin) {
-  return serialize({
-    id: admin._id,
-    email: admin.email,
-    name: admin.name,
-    role: admin.role || "admin",
-    is_active: admin.is_active !== false,
-    last_login: admin.last_login,
-    created_at: admin.created_at
-  });
+function adminToken(admin) {
+  const payload = { sub: idString(admin.id), email: admin.email, name: admin.name, role: admin.role || "admin", type: "admin" };
+  return {
+    access_token: jwt.sign(payload, process.env.ADMIN_JWT_SECRET, { expiresIn: "24h" }),
+    refresh_token: jwt.sign(payload, process.env.ADMIN_JWT_SECRET, { expiresIn: "7d" }),
+    token_type: "bearer",
+    expires_in: 86400,
+    admin: adminPublic(admin)
+  };
 }
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
+function allowedOrigin(origin) {
+  if (!origin) return true;
+  if (corsOrigins.includes(origin)) return true;
+  try {
+    const host = new URL(origin).hostname;
+    return ["whitesmoke-jay-438498.hostingersite.com", "localhost", "127.0.0.1"].includes(host);
+  } catch {
+    return false;
+  }
+}
+
+app.use(helmet());
+app.use(cors({
+  origin(origin, cb) {
+    return allowedOrigin(origin) ? cb(null, true) : cb(new Error("Origin not allowed by CORS"));
+  },
+  credentials: true
+}));
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+app.post(`${API_PREFIX}/payment/webhook`, express.raw({ type: "*/*" }), paymentWebhook);
+app.use(express.json({ limit: "1mb" }));
+
+async function getUserById(id) {
+  const [rows] = await db.execute("SELECT * FROM users WHERE id = ? LIMIT 1", [id]);
+  return rows[0] || null;
 }
 
 async function authRequired(req, res, next) {
@@ -177,7 +147,7 @@ async function authRequired(req, res, next) {
     const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
     if (!token) return res.status(403).json({ detail: "Missing token" });
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await collections.users.findOne({ _id: objectId(payload.sub) });
+    const user = await getUserById(payload.sub);
     if (!user) return res.status(403).json({ detail: "User not found" });
     req.auth = payload;
     req.user = user;
@@ -193,7 +163,7 @@ async function authOptional(req, _res, next) {
     if (token) {
       const payload = jwt.verify(token, process.env.JWT_SECRET);
       req.auth = payload;
-      req.user = await collections.users.findOne({ _id: objectId(payload.sub) });
+      req.user = await getUserById(payload.sub);
     }
   } catch {
     req.auth = null;
@@ -207,9 +177,9 @@ async function adminRequired(req, res, next) {
     const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
     if (!token) return res.status(401).json({ detail: "Missing admin token" });
     const payload = jwt.verify(token, process.env.ADMIN_JWT_SECRET);
-    if (payload.type !== "admin") return res.status(401).json({ detail: "Invalid admin token" });
-    const admin = await collections.admins.findOne({ _id: objectId(payload.sub) });
-    if (!admin || admin.is_active === false) return res.status(401).json({ detail: "Admin not found or inactive" });
+    const [rows] = await db.execute("SELECT * FROM admins WHERE id = ? LIMIT 1", [payload.sub]);
+    const admin = rows[0];
+    if (!admin || !admin.is_active) return res.status(401).json({ detail: "Admin not found or inactive" });
     req.admin = admin;
     req.adminPayload = payload;
     return next();
@@ -218,740 +188,630 @@ async function adminRequired(req, res, next) {
   }
 }
 
-async function ensureIndexes() {
-  await safeCreateIndex(collections.users, { phone: 1 }, { unique: true });
-  await safeCreateIndex(collections.users, { email: 1 }, { sparse: true });
-  await safeCreateIndex(collections.admins, { email: 1 }, { unique: true });
-  await safeCreateIndex(collections.menu_items, { slug: 1 }, { unique: true });
-  await safeCreateIndex(collections.menu_items, { category: 1 });
-  await safeCreateIndex(collections.menu_items, { is_available: 1 });
-  await safeCreateIndex(collections.carts, { user_id: 1 }, { unique: true });
-  await safeCreateIndex(collections.orders, { order_number: 1 }, { unique: true });
-  await safeCreateIndex(collections.orders, { user_id: 1 });
-  await safeCreateIndex(collections.orders, { status: 1 });
-  await safeCreateIndex(collections.reservations, { phone: 1 });
-  await safeCreateIndex(collections.reservations, { date: -1 });
-  await safeCreateIndex(collections.payments, { razorpay_order_id: 1 }, { unique: true });
+async function migrate() {
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS users (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      phone VARCHAR(32) NOT NULL UNIQUE,
+      email VARCHAR(190) NULL UNIQUE,
+      name VARCHAR(120) NULL,
+      password_hash VARCHAR(190) NULL,
+      salt VARCHAR(64) NULL,
+      dob DATE NULL,
+      addresses JSON NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      is_admin TINYINT(1) NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS admins (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      email VARCHAR(190) NOT NULL UNIQUE,
+      name VARCHAR(120) NOT NULL,
+      password_hash VARCHAR(190) NOT NULL,
+      salt VARCHAR(64) NOT NULL,
+      role VARCHAR(50) NOT NULL DEFAULT 'admin',
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      last_login DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS menu_items (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(190) NOT NULL,
+      slug VARCHAR(220) NOT NULL UNIQUE,
+      category VARCHAR(80) NOT NULL,
+      price DECIMAL(10,2) NOT NULL,
+      description TEXT NULL,
+      image_url TEXT NULL,
+      is_available TINYINT(1) NOT NULL DEFAULT 1,
+      rating JSON NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS carts (
+      user_id BIGINT UNSIGNED PRIMARY KEY,
+      items JSON NOT NULL,
+      total DECIMAL(10,2) NOT NULL DEFAULT 0,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS orders (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      order_number VARCHAR(40) NOT NULL UNIQUE,
+      user_id BIGINT UNSIGNED NOT NULL,
+      items JSON NOT NULL,
+      subtotal DECIMAL(10,2) NOT NULL,
+      delivery_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
+      total DECIMAL(10,2) NOT NULL,
+      order_type VARCHAR(30) NOT NULL,
+      address TEXT NULL,
+      notes TEXT NULL,
+      status VARCHAR(40) NOT NULL DEFAULT 'pending',
+      payment_status VARCHAR(40) NOT NULL DEFAULT 'pending',
+      payment_id VARCHAR(120) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS reservations (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      user_id BIGINT UNSIGNED NULL,
+      name VARCHAR(120) NOT NULL,
+      phone VARCHAR(32) NOT NULL,
+      date DATE NOT NULL,
+      time VARCHAR(8) NOT NULL,
+      guests INT NOT NULL,
+      special_requests TEXT NULL,
+      preorder_items JSON NULL,
+      preorder_total DECIMAL(10,2) NOT NULL DEFAULT 0,
+      status VARCHAR(40) NOT NULL DEFAULT 'pending',
+      payment_status VARCHAR(40) NOT NULL DEFAULT 'pending',
+      payment_id VARCHAR(120) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS payments (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      razorpay_order_id VARCHAR(120) NOT NULL UNIQUE,
+      razorpay_payment_id VARCHAR(120) NULL,
+      razorpay_signature TEXT NULL,
+      amount DECIMAL(10,2) NOT NULL,
+      currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+      status VARCHAR(40) NOT NULL DEFAULT 'created',
+      order_id BIGINT UNSIGNED NULL,
+      reservation_id BIGINT UNSIGNED NULL,
+      notes JSON NULL,
+      webhook_payload JSON NULL,
+      last_webhook_event VARCHAR(120) NULL,
+      verified_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS reviews (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      item_id BIGINT UNSIGNED NULL,
+      user_id BIGINT UNSIGNED NULL,
+      order_id BIGINT UNSIGNED NULL,
+      rating INT NOT NULL,
+      comment TEXT NULL,
+      approved TINYINT(1) NOT NULL DEFAULT 0,
+      rejected TINYINT(1) NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS offers (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(190) NOT NULL,
+      description TEXT NULL,
+      discount_type VARCHAR(40) NULL,
+      discount_value DECIMAL(10,2) NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      data JSON NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS settings (
+      id VARCHAR(80) PRIMARY KEY,
+      data JSON NOT NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`
+  ];
+  for (const sql of statements) await db.query(sql);
 }
 
-async function safeCreateIndex(collection, keys, options = {}) {
-  try {
-    await collection.createIndex(keys, options);
-  } catch (error) {
-    if (error.code === 85 || error.code === 86) {
-      console.warn(`Keeping existing MongoDB index for ${collection.collectionName}: ${JSON.stringify(keys)}`);
-      return;
-    }
-    throw error;
-  }
-}
-
-async function ensureDefaultAdmin() {
-  const existing = await collections.admins.findOne({ email: settings.adminEmail });
-  if (existing) return;
+async function ensureAdmin() {
+  const [rows] = await db.execute("SELECT id FROM admins WHERE email = ? LIMIT 1", [settings.adminEmail]);
+  if (rows.length) return;
   const { hash, salt } = hashPassword(settings.adminPassword);
-  await collections.admins.insertOne({
-    email: settings.adminEmail,
-    name: "Super Admin",
-    password_hash: hash,
-    salt,
-    role: "super_admin",
-    is_active: true,
-    created_at: now(),
-    updated_at: now()
-  });
+  await db.execute(
+    "INSERT INTO admins (email,name,password_hash,salt,role,is_active) VALUES (?,?,?,?,?,1)",
+    [settings.adminEmail, "Super Admin", hash, salt, "super_admin"]
+  );
 }
 
 function slugify(name) {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+  return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-function generateOrderNumber() {
-  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const random = crypto.randomBytes(3).toString("hex").toUpperCase();
-  return `CC${stamp}${random}`;
+function orderNumber() {
+  return `CC${new Date().toISOString().slice(0, 10).replace(/-/g, "")}${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
-async function priceOrderItems(items) {
-  const priced = [];
+function publicMenu(row) {
+  return {
+    _id: idString(row.id),
+    id: idString(row.id),
+    name: row.name,
+    slug: row.slug,
+    category: row.category,
+    price: Number(row.price),
+    description: row.description || "",
+    image_url: row.image_url || "",
+    is_available: Boolean(row.is_available),
+    rating: toJson(row.rating, { avg: 0, count: 0 }),
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
+
+function publicOrder(row) {
+  return { ...row, _id: idString(row.id), id: idString(row.id), user_id: idString(row.user_id), items: toJson(row.items, []) };
+}
+
+function publicReservation(row) {
+  return { ...row, _id: idString(row.id), id: idString(row.id), user_id: row.user_id ? idString(row.user_id) : null, preorder_items: toJson(row.preorder_items, []) };
+}
+
+async function pricedItems(items) {
+  const result = [];
   for (const item of items || []) {
-    const id = objectId(item.item_id || item.id);
-    if (!id) throw new Error("Invalid item id");
-    const menuItem = await collections.menu_items.findOne({ _id: id, is_available: { $ne: false } });
-    if (!menuItem) throw new Error("One or more menu items are unavailable");
+    const [rows] = await db.execute("SELECT * FROM menu_items WHERE id = ? AND is_available = 1 LIMIT 1", [item.item_id || item.id]);
+    if (!rows[0]) throw new Error("One or more menu items are unavailable");
     const quantity = Math.max(1, Number(item.quantity || 1));
-    priced.push({
-      item_id: menuItem._id.toString(),
-      name: menuItem.name,
-      price: Number(menuItem.price),
-      quantity,
-      image_url: menuItem.image_url || null
-    });
+    result.push({ item_id: idString(rows[0].id), name: rows[0].name, price: Number(rows[0].price), quantity, image_url: rows[0].image_url || null });
   }
-  return priced;
+  return result;
 }
 
-function cartTotal(items) {
-  return items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
-}
-
-function menuResponse(item) {
-  return serialize({
-    ...item,
-    id: item._id
-  });
+function total(items) {
+  return (items || []).reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
 }
 
 const staticDir = [
   process.env.STATIC_DIR,
   path.join(__dirname, "..", "frontend"),
-  path.join(__dirname, "..", "..", "frontend"),
-  path.join(__dirname, "..", "..", "public_html", "frontend")
+  path.join(__dirname, "..", "..", "frontend")
 ].filter(Boolean).find((candidate) => fs.existsSync(path.join(candidate, "index.html")));
+if (staticDir) app.use(express.static(staticDir));
 
-if (staticDir) {
-  app.use(express.static(staticDir));
-}
-
-app.get("/api", (_req, res) => {
-  res.json({ name: "Cheesy Crust Co. API", version: "1.0.0-node", status: "online", environment: process.env.NODE_ENV || "development" });
-});
-
+app.get("/api", (_req, res) => res.json({ name: "Cheesy Crust Co. API", version: "1.0.0-mysql", status: "online", environment: process.env.NODE_ENV || "development" }));
 app.get("/health", asyncRoute(async (_req, res) => {
-  await db.command({ ping: 1 });
-  res.json({ status: "healthy", database: "connected", runtime: "nodejs" });
+  await db.query("SELECT 1");
+  res.json({ status: "healthy", database: "mysql-connected", runtime: "nodejs" });
 }));
 
 app.post(`${API_PREFIX}/auth/register`, asyncRoute(async (req, res) => {
   const { name, email, phone, password } = req.body || {};
-  if (!name || !email || !phone || !password || String(password).length < 8) {
-    return res.status(400).json({ detail: "Name, email, mobile number, and 8+ character password are required" });
-  }
+  if (!name || !email || !phone || !password || String(password).length < 8) return res.status(400).json({ detail: "Name, email, mobile number, and 8+ character password are required" });
   const normalizedPhone = normalizePhone(phone);
   const normalizedEmail = String(email).toLowerCase().trim();
-  const existing = await collections.users.findOne({ $or: [{ email: normalizedEmail }, { phone: normalizedPhone }] });
-  if (existing) return res.status(400).json({ detail: existing.email === normalizedEmail ? "Email already registered" : "Mobile number already registered" });
+  const [existing] = await db.execute("SELECT id,email,phone FROM users WHERE email = ? OR phone = ? LIMIT 1", [normalizedEmail, normalizedPhone]);
+  if (existing.length) return res.status(400).json({ detail: existing[0].email === normalizedEmail ? "Email already registered" : "Mobile number already registered" });
   const { hash, salt } = hashPassword(password);
-  const user = {
-    name: String(name).trim(),
-    email: normalizedEmail,
-    phone: normalizedPhone,
-    password_hash: hash,
-    salt,
-    addresses: [],
-    is_active: true,
-    is_admin: false,
-    created_at: now(),
-    updated_at: now()
-  };
-  const result = await collections.users.insertOne(user);
-  user._id = result.insertedId;
-  return res.status(201).json(tokenPairForUser(user));
+  const [result] = await db.execute("INSERT INTO users (name,email,phone,password_hash,salt,addresses,is_active,is_admin) VALUES (?,?,?,?,?,JSON_ARRAY(),1,0)", [name.trim(), normalizedEmail, normalizedPhone, hash, salt]);
+  const user = await getUserById(result.insertId);
+  res.status(201).json(userToken(user));
 }));
 
 app.post(`${API_PREFIX}/auth/login`, asyncRoute(async (req, res) => {
   const { identifier, password } = req.body || {};
   if (!identifier || !password) return res.status(401).json({ detail: "Invalid email/mobile or password" });
-  let query;
-  if (String(identifier).includes("@")) query = { email: String(identifier).toLowerCase().trim() };
-  else query = { phone: normalizePhone(identifier) };
-  const user = await collections.users.findOne(query);
-  if (!user || user.is_active === false || !verifyPassword(password, user.salt, user.password_hash)) {
-    return res.status(401).json({ detail: "Invalid email/mobile or password" });
-  }
-  return res.json(tokenPairForUser(user));
+  const field = String(identifier).includes("@") ? "email" : "phone";
+  const value = field === "email" ? String(identifier).toLowerCase().trim() : normalizePhone(identifier);
+  const [rows] = await db.execute(`SELECT * FROM users WHERE ${field} = ? LIMIT 1`, [value]);
+  const user = rows[0];
+  if (!user || !user.is_active || !verifyPassword(password, user.salt, user.password_hash)) return res.status(401).json({ detail: "Invalid email/mobile or password" });
+  res.json(userToken(user));
 }));
 
 app.post(`${API_PREFIX}/auth/refresh`, asyncRoute(async (req, res) => {
   try {
     const payload = jwt.verify(req.body.refresh_token, process.env.JWT_SECRET);
     if (payload.type !== "refresh") return res.status(401).json({ detail: "Invalid refresh token" });
-    const user = await collections.users.findOne({ _id: objectId(payload.sub) });
+    const user = await getUserById(payload.sub);
     if (!user) return res.status(401).json({ detail: "User not found" });
-    return res.json(tokenPairForUser(user));
+    res.json(userToken(user));
   } catch {
-    return res.status(401).json({ detail: "Invalid refresh token" });
+    res.status(401).json({ detail: "Invalid refresh token" });
   }
 }));
-
 app.post(`${API_PREFIX}/auth/logout`, (_req, res) => res.json({ success: true, message: "Logged out successfully" }));
 
 app.post(`${API_PREFIX}/admin/auth/login`, asyncRoute(async (req, res) => {
-  const email = String(req.body.email || "").toLowerCase().trim();
-  const password = String(req.body.password || "");
-  const admin = await collections.admins.findOne({ email });
-  if (!admin || admin.is_active === false || !verifyPassword(password, admin.salt, admin.password_hash)) {
-    return res.status(401).json({ detail: "Invalid email or password" });
-  }
-  await collections.admins.updateOne({ _id: admin._id }, { $set: { last_login: now() } });
-  return res.json({ success: true, message: "Login successful", ...tokenPairForAdmin({ ...admin, last_login: now() }) });
+  const [rows] = await db.execute("SELECT * FROM admins WHERE email = ? LIMIT 1", [String(req.body.email || "").toLowerCase().trim()]);
+  const admin = rows[0];
+  if (!admin || !admin.is_active || !verifyPassword(req.body.password, admin.salt, admin.password_hash)) return res.status(401).json({ detail: "Invalid email or password" });
+  await db.execute("UPDATE admins SET last_login = NOW() WHERE id = ?", [admin.id]);
+  res.json({ success: true, message: "Login successful", ...adminToken({ ...admin, last_login: new Date() }) });
 }));
-
 app.post(`${API_PREFIX}/admin/auth/logout`, adminRequired, (_req, res) => res.json({ success: true, message: "Logged out successfully" }));
-
-app.get(`${API_PREFIX}/admin/auth/me`, adminRequired, (req, res) => res.json({ success: true, admin: publicAdmin(req.admin) }));
-
+app.get(`${API_PREFIX}/admin/auth/me`, adminRequired, (req, res) => res.json({ success: true, admin: adminPublic(req.admin) }));
 app.post(`${API_PREFIX}/admin/auth/refresh`, asyncRoute(async (req, res) => {
   try {
     const payload = jwt.verify(req.body.refresh_token, process.env.ADMIN_JWT_SECRET);
-    if (payload.type !== "admin") return res.status(401).json({ detail: "Invalid refresh token" });
-    const admin = await collections.admins.findOne({ _id: objectId(payload.sub) });
-    if (!admin || admin.is_active === false) return res.status(401).json({ detail: "Admin not found or inactive" });
-    return res.json({ success: true, message: "Token refreshed", ...tokenPairForAdmin(admin) });
+    const [rows] = await db.execute("SELECT * FROM admins WHERE id = ? LIMIT 1", [payload.sub]);
+    if (!rows[0]) return res.status(401).json({ detail: "Admin not found" });
+    res.json({ success: true, message: "Token refreshed", ...adminToken(rows[0]) });
   } catch {
-    return res.status(401).json({ detail: "Invalid refresh token" });
+    res.status(401).json({ detail: "Invalid refresh token" });
   }
 }));
-
 app.put(`${API_PREFIX}/admin/auth/profile`, adminRequired, asyncRoute(async (req, res) => {
-  const update = {};
-  if (req.body.name) update.name = String(req.body.name).trim();
-  if (req.body.email) update.email = String(req.body.email).toLowerCase().trim();
-  update.updated_at = now();
-  await collections.admins.updateOne({ _id: req.admin._id }, { $set: update });
-  const admin = await collections.admins.findOne({ _id: req.admin._id });
-  res.json({ success: true, admin: publicAdmin(admin) });
+  await db.execute("UPDATE admins SET name = COALESCE(?, name), email = COALESCE(?, email) WHERE id = ?", [req.body.name || null, req.body.email ? String(req.body.email).toLowerCase().trim() : null, req.admin.id]);
+  const [rows] = await db.execute("SELECT * FROM admins WHERE id = ?", [req.admin.id]);
+  res.json({ success: true, admin: adminPublic(rows[0]) });
 }));
-
 app.post(`${API_PREFIX}/admin/auth/change-password`, adminRequired, asyncRoute(async (req, res) => {
-  if (!verifyPassword(req.body.current_password, req.admin.salt, req.admin.password_hash)) {
-    return res.status(400).json({ detail: "Current password is incorrect" });
-  }
+  if (!verifyPassword(req.body.current_password, req.admin.salt, req.admin.password_hash)) return res.status(400).json({ detail: "Current password is incorrect" });
   const { hash, salt } = hashPassword(req.body.new_password);
-  await collections.admins.updateOne({ _id: req.admin._id }, { $set: { password_hash: hash, salt, updated_at: now() } });
+  await db.execute("UPDATE admins SET password_hash = ?, salt = ? WHERE id = ?", [hash, salt, req.admin.id]);
   res.json({ success: true, message: "Password changed successfully" });
 }));
-
 app.post(`${API_PREFIX}/admin/auth/create`, adminRequired, asyncRoute(async (req, res) => {
   if (req.admin.role !== "super_admin") return res.status(403).json({ detail: "Super admin access required" });
-  const { email, password, name, role = "admin" } = req.body || {};
-  const { hash, salt } = hashPassword(password);
-  const admin = { email: String(email).toLowerCase().trim(), name, role, password_hash: hash, salt, is_active: true, created_at: now(), updated_at: now() };
-  const result = await collections.admins.insertOne(admin);
-  admin._id = result.insertedId;
-  res.json({ success: true, message: "Admin created", admin: publicAdmin(admin) });
+  const { hash, salt } = hashPassword(req.body.password);
+  const [result] = await db.execute("INSERT INTO admins (email,name,password_hash,salt,role,is_active) VALUES (?,?,?,?,?,1)", [String(req.body.email).toLowerCase().trim(), req.body.name, hash, salt, req.body.role || "admin"]);
+  const [rows] = await db.execute("SELECT * FROM admins WHERE id = ?", [result.insertId]);
+  res.json({ success: true, message: "Admin created", admin: adminPublic(rows[0]) });
 }));
-
 app.get(`${API_PREFIX}/admin/auth/users`, adminRequired, asyncRoute(async (_req, res) => {
-  const admins = await collections.admins.find().sort({ created_at: -1 }).toArray();
-  res.json({ success: true, admins: admins.map(publicAdmin) });
+  const [rows] = await db.query("SELECT * FROM admins ORDER BY created_at DESC");
+  res.json({ success: true, admins: rows.map(adminPublic) });
 }));
 
 app.get(`${API_PREFIX}/menu`, asyncRoute(async (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
   const perPage = Math.min(100, Math.max(1, Number(req.query.per_page || 50)));
-  const query = {};
-  if (req.query.category) query.category = req.query.category;
-  if (String(req.query.available_only) === "true") query.is_available = { $ne: false };
-  const total = await collections.menu_items.countDocuments(query);
-  const items = await collections.menu_items.find(query).skip((page - 1) * perPage).limit(perPage).toArray();
-  const categories = await collections.menu_items.distinct("category");
-  res.json({ items: items.map(menuResponse), total, categories });
+  const where = [];
+  const params = [];
+  if (req.query.category) { where.push("category = ?"); params.push(req.query.category); }
+  if (String(req.query.available_only) === "true") where.push("is_available = 1");
+  const sqlWhere = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const [[count]] = await db.query(`SELECT COUNT(*) AS total FROM menu_items ${sqlWhere}`, params);
+  const [items] = await db.query(`SELECT * FROM menu_items ${sqlWhere} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, perPage, (page - 1) * perPage]);
+  const [cats] = await db.query("SELECT DISTINCT category FROM menu_items ORDER BY category");
+  res.json({ items: items.map(publicMenu), total: count.total, categories: cats.map((c) => c.category) });
 }));
-
 app.get(`${API_PREFIX}/menu/categories`, asyncRoute(async (_req, res) => {
-  res.json({ success: true, categories: await collections.menu_items.distinct("category") });
+  const [rows] = await db.query("SELECT DISTINCT category FROM menu_items ORDER BY category");
+  res.json({ success: true, categories: rows.map((r) => r.category) });
 }));
-
 app.get(`${API_PREFIX}/menu/category/:category`, asyncRoute(async (req, res) => {
-  const items = await collections.menu_items.find({ category: req.params.category }).toArray();
-  res.json({ success: true, category: req.params.category, items: items.map(menuResponse), total: items.length });
+  const [rows] = await db.execute("SELECT * FROM menu_items WHERE category = ?", [req.params.category]);
+  res.json({ success: true, category: req.params.category, items: rows.map(publicMenu), total: rows.length });
 }));
-
-app.get(`${API_PREFIX}/menu/:itemId`, asyncRoute(async (req, res) => {
-  const id = objectId(req.params.itemId);
-  const item = id ? await collections.menu_items.findOne({ _id: id }) : null;
-  if (!item) return res.status(404).json({ detail: "Menu item not found" });
-  res.json(menuResponse(item));
+app.get(`${API_PREFIX}/menu/:id`, asyncRoute(async (req, res) => {
+  const [rows] = await db.execute("SELECT * FROM menu_items WHERE id = ? LIMIT 1", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ detail: "Menu item not found" });
+  res.json(publicMenu(rows[0]));
 }));
-
 app.post(`${API_PREFIX}/menu`, adminRequired, asyncRoute(async (req, res) => {
-  const body = req.body || {};
-  const item = {
-    name: body.name,
-    slug: slugify(body.name),
-    category: body.category,
-    price: Number(body.price),
-    description: body.description || "",
-    image_url: body.image_url || body.img || "",
-    is_available: body.is_available !== false,
-    rating: { avg: 0, count: 0 },
-    created_at: now(),
-    updated_at: now()
-  };
-  const result = await collections.menu_items.insertOne(item);
-  item._id = result.insertedId;
-  res.status(201).json(menuResponse(item));
+  const slug = slugify(req.body.name);
+  const rating = JSON.stringify({ avg: 0, count: 0 });
+  const [result] = await db.execute("INSERT INTO menu_items (name,slug,category,price,description,image_url,is_available,rating) VALUES (?,?,?,?,?,?,?,?)", [req.body.name, slug, req.body.category, Number(req.body.price), req.body.description || "", req.body.image_url || req.body.img || "", req.body.is_available !== false ? 1 : 0, rating]);
+  const [rows] = await db.execute("SELECT * FROM menu_items WHERE id = ?", [result.insertId]);
+  res.status(201).json(publicMenu(rows[0]));
 }));
-
-app.put(`${API_PREFIX}/menu/:itemId`, adminRequired, asyncRoute(async (req, res) => {
-  const id = objectId(req.params.itemId);
-  if (!id) return res.status(400).json({ detail: "Invalid item id" });
-  const update = { ...req.body, updated_at: now() };
-  if (update.name) update.slug = slugify(update.name);
-  const result = await collections.menu_items.findOneAndUpdate({ _id: id }, { $set: update }, { returnDocument: "after" });
-  if (!result) return res.status(404).json({ detail: "Menu item not found" });
-  res.json(menuResponse(result));
+app.put(`${API_PREFIX}/menu/:id`, adminRequired, asyncRoute(async (req, res) => {
+  const fields = ["name", "category", "price", "description", "image_url", "is_available"].filter((f) => req.body[f] !== undefined);
+  const updates = fields.map((f) => `${f} = ?`);
+  const params = fields.map((f) => f === "is_available" ? (req.body[f] ? 1 : 0) : req.body[f]);
+  if (req.body.name) { updates.push("slug = ?"); params.push(slugify(req.body.name)); }
+  if (!updates.length) return res.status(400).json({ detail: "No update data" });
+  params.push(req.params.id);
+  await db.execute(`UPDATE menu_items SET ${updates.join(", ")} WHERE id = ?`, params);
+  const [rows] = await db.execute("SELECT * FROM menu_items WHERE id = ?", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ detail: "Menu item not found" });
+  res.json(publicMenu(rows[0]));
 }));
-
-app.patch(`${API_PREFIX}/menu/:itemId/toggle-availability`, adminRequired, asyncRoute(async (req, res) => {
-  const id = objectId(req.params.itemId);
-  const item = id ? await collections.menu_items.findOne({ _id: id }) : null;
-  if (!item) return res.status(404).json({ detail: "Menu item not found" });
-  const result = await collections.menu_items.findOneAndUpdate({ _id: id }, { $set: { is_available: item.is_available === false, updated_at: now() } }, { returnDocument: "after" });
-  res.json(menuResponse(result));
+app.patch(`${API_PREFIX}/menu/:id/toggle-availability`, adminRequired, asyncRoute(async (req, res) => {
+  await db.execute("UPDATE menu_items SET is_available = IF(is_available=1,0,1) WHERE id = ?", [req.params.id]);
+  const [rows] = await db.execute("SELECT * FROM menu_items WHERE id = ?", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ detail: "Menu item not found" });
+  res.json(publicMenu(rows[0]));
 }));
-
-app.delete(`${API_PREFIX}/menu/:itemId`, adminRequired, asyncRoute(async (req, res) => {
-  const id = objectId(req.params.itemId);
-  const result = id ? await collections.menu_items.deleteOne({ _id: id }) : { deletedCount: 0 };
-  if (!result.deletedCount) return res.status(404).json({ detail: "Menu item not found" });
+app.delete(`${API_PREFIX}/menu/:id`, adminRequired, asyncRoute(async (req, res) => {
+  const [result] = await db.execute("DELETE FROM menu_items WHERE id = ?", [req.params.id]);
+  if (!result.affectedRows) return res.status(404).json({ detail: "Menu item not found" });
   res.json({ success: true, message: "Menu item deleted successfully" });
 }));
 
-app.get(`${API_PREFIX}/cart`, authRequired, asyncRoute(async (req, res) => {
-  const cart = await getOrCreateCart(req.user._id);
-  res.json(formatCart(cart));
-}));
-
+async function getCart(userId) {
+  const [rows] = await db.execute("SELECT * FROM carts WHERE user_id = ? LIMIT 1", [userId]);
+  if (rows[0]) return { ...rows[0], items: toJson(rows[0].items, []) };
+  await db.execute("INSERT INTO carts (user_id, items, total) VALUES (?, JSON_ARRAY(), 0)", [userId]);
+  return { user_id: userId, items: [], total: 0 };
+}
+async function saveCart(userId, items) {
+  await db.execute("INSERT INTO carts (user_id, items, total) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE items=VALUES(items), total=VALUES(total), updated_at=NOW()", [userId, JSON.stringify(items), total(items)]);
+}
+function cartResponse(cart) {
+  const items = cart.items || [];
+  return { _id: idString(cart.user_id), items: items.map((i) => ({ ...i, subtotal: Number(i.price) * Number(i.quantity) })), total: total(items), item_count: items.reduce((s, i) => s + Number(i.quantity), 0), updated_at: cart.updated_at || new Date() };
+}
+app.get(`${API_PREFIX}/cart`, authRequired, asyncRoute(async (req, res) => res.json(cartResponse(await getCart(req.user.id)))));
 app.post(`${API_PREFIX}/cart/add`, authRequired, asyncRoute(async (req, res) => {
-  const itemId = objectId(req.body.item_id);
-  const menuItem = itemId ? await collections.menu_items.findOne({ _id: itemId, is_available: { $ne: false } }) : null;
-  if (!menuItem) return res.status(400).json({ detail: "Failed to add item to cart" });
-  const cart = await getOrCreateCart(req.user._id);
-  const existing = cart.items.find((item) => item.item_id === menuItem._id.toString());
-  if (existing) existing.quantity += Number(req.body.quantity || 1);
-  else cart.items.push({ item_id: menuItem._id.toString(), name: menuItem.name, price: Number(menuItem.price), quantity: Number(req.body.quantity || 1), image_url: menuItem.image_url || null });
-  await saveCart(req.user._id, cart.items);
-  res.json({ success: true, message: "Item added to cart", cart_total: cartTotal(cart.items), item_count: cart.items.reduce((sum, item) => sum + item.quantity, 0) });
+  const [rows] = await db.execute("SELECT * FROM menu_items WHERE id = ? AND is_available = 1 LIMIT 1", [req.body.item_id]);
+  if (!rows[0]) return res.status(400).json({ detail: "Failed to add item to cart" });
+  const cart = await getCart(req.user.id);
+  const found = cart.items.find((i) => i.item_id === idString(rows[0].id));
+  if (found) found.quantity += Number(req.body.quantity || 1);
+  else cart.items.push({ item_id: idString(rows[0].id), name: rows[0].name, price: Number(rows[0].price), quantity: Number(req.body.quantity || 1), image_url: rows[0].image_url || null });
+  await saveCart(req.user.id, cart.items);
+  res.json({ success: true, message: "Item added to cart", cart_total: total(cart.items), item_count: cart.items.reduce((s, i) => s + i.quantity, 0) });
 }));
-
 app.put(`${API_PREFIX}/cart/update`, authRequired, asyncRoute(async (req, res) => {
-  const cart = await getOrCreateCart(req.user._id);
-  const item = cart.items.find((entry) => entry.item_id === req.body.item_id);
-  if (!item) return res.status(400).json({ detail: "Failed to update cart item" });
-  item.quantity = Number(req.body.quantity || 1);
-  if (item.quantity <= 0) cart.items = cart.items.filter((entry) => entry.item_id !== req.body.item_id);
-  await saveCart(req.user._id, cart.items);
-  res.json({ success: true, message: "Cart updated", cart_total: cartTotal(cart.items), item_count: cart.items.reduce((sum, entry) => sum + entry.quantity, 0) });
+  const cart = await getCart(req.user.id);
+  const found = cart.items.find((i) => i.item_id === idString(req.body.item_id));
+  if (!found) return res.status(400).json({ detail: "Failed to update cart item" });
+  found.quantity = Number(req.body.quantity || 1);
+  const items = found.quantity <= 0 ? cart.items.filter((i) => i.item_id !== idString(req.body.item_id)) : cart.items;
+  await saveCart(req.user.id, items);
+  res.json({ success: true, message: "Cart updated", cart_total: total(items), item_count: items.reduce((s, i) => s + i.quantity, 0) });
 }));
-
-app.delete(`${API_PREFIX}/cart/remove/:itemId`, authRequired, asyncRoute(async (req, res) => {
-  const cart = await getOrCreateCart(req.user._id);
-  const items = cart.items.filter((item) => item.item_id !== req.params.itemId);
-  await saveCart(req.user._id, items);
-  res.json({ success: true, message: "Item removed from cart", cart_total: cartTotal(items), item_count: items.reduce((sum, item) => sum + item.quantity, 0) });
+app.delete(`${API_PREFIX}/cart/remove/:id`, authRequired, asyncRoute(async (req, res) => {
+  const cart = await getCart(req.user.id);
+  const items = cart.items.filter((i) => i.item_id !== idString(req.params.id));
+  await saveCart(req.user.id, items);
+  res.json({ success: true, message: "Item removed from cart", cart_total: total(items), item_count: items.reduce((s, i) => s + i.quantity, 0) });
 }));
-
 app.delete(`${API_PREFIX}/cart/clear`, authRequired, asyncRoute(async (req, res) => {
-  await saveCart(req.user._id, []);
+  await saveCart(req.user.id, []);
   res.json({ success: true, message: "Cart cleared successfully" });
 }));
 
-async function getOrCreateCart(userId) {
-  let cart = await collections.carts.findOne({ user_id: userId });
-  if (!cart) {
-    cart = { user_id: userId, items: [], total: 0, updated_at: now() };
-    const result = await collections.carts.insertOne(cart);
-    cart._id = result.insertedId;
-  }
-  return cart;
-}
-
-async function saveCart(userId, items) {
-  const total = cartTotal(items);
-  await collections.carts.updateOne({ user_id: userId }, { $set: { items, total, updated_at: now() } }, { upsert: true });
-}
-
-function formatCart(cart) {
-  const items = cart.items || [];
-  return serialize({ _id: cart._id, items: items.map((item) => ({ ...item, subtotal: Number(item.price) * Number(item.quantity) })), total: cartTotal(items), item_count: items.reduce((sum, item) => sum + item.quantity, 0), updated_at: cart.updated_at || now() });
-}
-
 app.post(`${API_PREFIX}/orders/create`, authRequired, asyncRoute(async (req, res) => {
-  const items = await priceOrderItems(req.body.items);
+  const items = await pricedItems(req.body.items);
   if (!items.length) return res.status(400).json({ detail: "Order requires at least one item" });
-  const subtotal = cartTotal(items);
+  const subtotal = total(items);
   const deliveryFee = req.body.order_type === "delivery" && subtotal < settings.freeDeliveryThreshold ? settings.deliveryFee : 0;
-  const total = subtotal + deliveryFee;
-  const order = {
-    order_number: generateOrderNumber(),
-    user_id: req.user._id,
-    items,
-    subtotal,
-    delivery_fee: deliveryFee,
-    total,
-    order_type: req.body.order_type,
-    address: req.body.address || null,
-    notes: req.body.notes || null,
-    status: "pending",
-    payment_status: "pending",
-    created_at: now(),
-    updated_at: now()
-  };
-  const result = await collections.orders.insertOne(order);
-  order._id = result.insertedId;
-  res.json({ success: true, message: "Order created successfully", order_id: order._id.toString(), order_number: order.order_number, total });
+  const grand = subtotal + deliveryFee;
+  const number = orderNumber();
+  const [result] = await db.execute("INSERT INTO orders (order_number,user_id,items,subtotal,delivery_fee,total,order_type,address,notes,status,payment_status) VALUES (?,?,?,?,?,?,?,?,?, 'pending','pending')", [number, req.user.id, JSON.stringify(items), subtotal, deliveryFee, grand, req.body.order_type, req.body.address || null, req.body.notes || null]);
+  res.json({ success: true, message: "Order created successfully", order_id: idString(result.insertId), order_number: number, total: grand });
 }));
-
 app.get(`${API_PREFIX}/orders/user`, authRequired, asyncRoute(async (req, res) => {
-  const orders = await collections.orders.find({ user_id: req.user._id }).sort({ created_at: -1 }).limit(50).toArray();
-  res.json({ success: true, orders: serialize(orders), total: orders.length });
+  const [rows] = await db.execute("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 50", [req.user.id]);
+  res.json({ success: true, orders: rows.map(publicOrder), total: rows.length });
 }));
-
 app.get(`${API_PREFIX}/orders/admin/all`, adminRequired, asyncRoute(async (req, res) => {
-  const page = Math.max(1, Number(req.query.page || 1));
-  const perPage = Math.min(100, Math.max(1, Number(req.query.per_page || 20)));
-  const query = req.query.status ? { status: req.query.status } : {};
-  const total = await collections.orders.countDocuments(query);
-  const orders = await collections.orders.find(query).sort({ created_at: -1 }).skip((page - 1) * perPage).limit(perPage).toArray();
-  res.json({ success: true, orders: serialize(orders), total, page, per_page: perPage, total_pages: Math.ceil(total / perPage) });
+  const page = Math.max(1, Number(req.query.page || 1)); const per = Math.min(100, Math.max(1, Number(req.query.per_page || 20)));
+  const where = req.query.status ? "WHERE status = ?" : ""; const params = req.query.status ? [req.query.status] : [];
+  const [[count]] = await db.query(`SELECT COUNT(*) total FROM orders ${where}`, params);
+  const [rows] = await db.query(`SELECT * FROM orders ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`, [...params, per, (page - 1) * per]);
+  res.json({ success: true, orders: rows.map(publicOrder), total: count.total, page, per_page: per, total_pages: Math.ceil(count.total / per) });
+}));
+app.get(`${API_PREFIX}/orders/admin/:id`, adminRequired, asyncRoute(async (req, res) => {
+  const [rows] = await db.execute("SELECT * FROM orders WHERE id = ? LIMIT 1", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ detail: "Order not found" });
+  res.json({ success: true, order: publicOrder(rows[0]) });
+}));
+app.patch(`${API_PREFIX}/orders/admin/:id/status`, adminRequired, asyncRoute(async (req, res) => {
+  const pay = ["delivered", "completed"].includes(req.body.status) ? ", payment_status='paid'" : "";
+  await db.execute(`UPDATE orders SET status = ?, notes = COALESCE(?, notes) ${pay} WHERE id = ?`, [req.body.status, req.body.notes || null, req.params.id]);
+  const [rows] = await db.execute("SELECT * FROM orders WHERE id = ?", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ detail: "Order not found" });
+  res.json({ success: true, message: `Order status updated to ${req.body.status}`, order: publicOrder(rows[0]) });
+}));
+app.get(`${API_PREFIX}/orders/:id`, authRequired, asyncRoute(async (req, res) => {
+  const [rows] = await db.execute("SELECT * FROM orders WHERE id = ? LIMIT 1", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ detail: "Order not found" });
+  if (Number(rows[0].user_id) !== Number(req.user.id) && !req.user.is_admin) return res.status(403).json({ detail: "Access denied" });
+  res.json({ success: true, order: publicOrder(rows[0]) });
 }));
 
-app.get(`${API_PREFIX}/orders/admin/:orderId`, adminRequired, asyncRoute(async (req, res) => {
-  const order = await collections.orders.findOne({ _id: objectId(req.params.orderId) });
-  if (!order) return res.status(404).json({ detail: "Order not found" });
-  res.json({ success: true, order: serialize(order) });
-}));
-
-app.patch(`${API_PREFIX}/orders/admin/:orderId/status`, adminRequired, asyncRoute(async (req, res) => {
-  const update = { status: req.body.status, updated_at: now() };
-  if (req.body.notes) update.notes = req.body.notes;
-  if (["delivered", "completed"].includes(req.body.status)) update.payment_status = "paid";
-  const result = await collections.orders.findOneAndUpdate({ _id: objectId(req.params.orderId) }, { $set: update }, { returnDocument: "after" });
-  if (!result) return res.status(404).json({ detail: "Order not found" });
-  res.json({ success: true, message: `Order status updated to ${req.body.status}`, order: serialize(result) });
-}));
-
-app.get(`${API_PREFIX}/orders/:orderId`, authRequired, asyncRoute(async (req, res) => {
-  const order = await collections.orders.findOne({ _id: objectId(req.params.orderId) });
-  if (!order) return res.status(404).json({ detail: "Order not found" });
-  if (!order.user_id.equals(req.user._id) && !req.user.is_admin) return res.status(403).json({ detail: "Access denied" });
-  res.json({ success: true, order: serialize(order) });
-}));
-
+async function availability(date, time, guests) {
+  if (!date || !time || !guests) return { available: false, error: "Missing date, time, or guests" };
+  if (guests > settings.maxGuests) return { available: false, error: `Maximum ${settings.maxGuests} guests per table` };
+  const [[count]] = await db.execute("SELECT COUNT(*) total FROM reservations WHERE date = ? AND time = ? AND status IN ('pending','confirmed')", [date, time]);
+  const tables = Math.max(0, 10 - count.total);
+  return { available: tables > 0, tables_available: tables, total_tables: 10 };
+}
 app.post(`${API_PREFIX}/reservation`, authOptional, asyncRoute(async (req, res) => {
-  const body = req.body || {};
-  const available = await checkAvailability(body.date, body.time, Number(body.guests));
-  if (!available.available) return res.status(400).json({ detail: available.error || "No tables available" });
-  const preorderItems = await priceOrderItems(body.preorder_items || []);
-  const preorderTotal = cartTotal(preorderItems);
-  const reservation = {
-    user_id: req.user ? req.user._id : null,
-    name: body.name,
-    phone: normalizePhone(body.phone),
-    date: body.date,
-    time: body.time,
-    guests: Number(body.guests),
-    special_requests: body.special_requests || null,
-    preorder_items: preorderItems,
-    preorder_total: preorderTotal,
-    status: "pending",
-    payment_status: preorderTotal > 0 ? "pending" : "paid",
-    created_at: now(),
-    updated_at: now()
-  };
-  const result = await collections.reservations.insertOne(reservation);
-  reservation._id = result.insertedId;
-  res.json({ success: true, message: "Reservation created successfully", reservation_id: reservation._id.toString(), preorder_total: preorderTotal });
+  const ok = await availability(req.body.date, req.body.time, Number(req.body.guests));
+  if (!ok.available) return res.status(400).json({ detail: ok.error || "No tables available" });
+  const items = await pricedItems(req.body.preorder_items || []);
+  const preorderTotal = total(items);
+  const [result] = await db.execute("INSERT INTO reservations (user_id,name,phone,date,time,guests,special_requests,preorder_items,preorder_total,status,payment_status) VALUES (?,?,?,?,?,?,?,?,?,'pending',?)", [req.user ? req.user.id : null, req.body.name, normalizePhone(req.body.phone), req.body.date, req.body.time, Number(req.body.guests), req.body.special_requests || null, JSON.stringify(items), preorderTotal, preorderTotal > 0 ? "pending" : "paid"]);
+  res.json({ success: true, message: "Reservation created successfully", reservation_id: idString(result.insertId), preorder_total: preorderTotal });
 }));
-
-app.get(`${API_PREFIX}/reservation/availability`, asyncRoute(async (req, res) => {
-  res.json({ success: true, ...(await checkAvailability(req.query.date, req.query.time, Number(req.query.guests))) });
-}));
-
+app.get(`${API_PREFIX}/reservation/availability`, asyncRoute(async (req, res) => res.json({ success: true, ...(await availability(req.query.date, req.query.time, Number(req.query.guests))) })));
 app.get(`${API_PREFIX}/reservation/slots/:date`, asyncRoute(async (req, res) => {
   const slots = [];
-  for (let hour = 11; hour <= 22; hour += 1) {
-    for (const minute of [0, 30]) {
-      if (hour === 22 && minute > 0) continue;
-      const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-      slots.push({ time, ...(await checkAvailability(req.params.date, time, Number(req.query.guests || 2))) });
-    }
+  for (let h = 11; h <= 22; h++) for (const m of [0, 30]) if (!(h === 22 && m > 0)) {
+    const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    slots.push({ time, ...(await availability(req.params.date, time, Number(req.query.guests || 2))) });
   }
   res.json({ success: true, date: req.params.date, guests: Number(req.query.guests || 2), slots });
 }));
-
 app.get(`${API_PREFIX}/reservation/user`, authRequired, asyncRoute(async (req, res) => {
-  const reservations = await collections.reservations.find({ user_id: req.user._id }).sort({ created_at: -1 }).toArray();
-  res.json({ success: true, reservations: serialize(reservations), total: reservations.length });
+  const [rows] = await db.execute("SELECT * FROM reservations WHERE user_id = ? ORDER BY created_at DESC", [req.user.id]);
+  res.json({ success: true, reservations: rows.map(publicReservation), total: rows.length });
 }));
-
 app.get(`${API_PREFIX}/reservation/admin/all`, adminRequired, asyncRoute(async (req, res) => {
-  const page = Math.max(1, Number(req.query.page || 1));
-  const perPage = Math.min(100, Math.max(1, Number(req.query.per_page || 20)));
-  const query = {};
-  if (req.query.date_filter) query.date = req.query.date_filter;
-  if (req.query.status) query.status = req.query.status;
-  const total = await collections.reservations.countDocuments(query);
-  const reservations = await collections.reservations.find(query).sort({ date: -1, time: -1 }).skip((page - 1) * perPage).limit(perPage).toArray();
-  res.json({ success: true, reservations: serialize(reservations), total, page, per_page: perPage, total_pages: Math.ceil(total / perPage) });
+  const page = Math.max(1, Number(req.query.page || 1)); const per = Math.min(100, Math.max(1, Number(req.query.per_page || 20)));
+  const where = []; const params = [];
+  if (req.query.date_filter) { where.push("date = ?"); params.push(req.query.date_filter); }
+  if (req.query.status) { where.push("status = ?"); params.push(req.query.status); }
+  const sqlWhere = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const [[count]] = await db.query(`SELECT COUNT(*) total FROM reservations ${sqlWhere}`, params);
+  const [rows] = await db.query(`SELECT * FROM reservations ${sqlWhere} ORDER BY date DESC, time DESC LIMIT ? OFFSET ?`, [...params, per, (page - 1) * per]);
+  res.json({ success: true, reservations: rows.map(publicReservation), total: count.total, page, per_page: per, total_pages: Math.ceil(count.total / per) });
 }));
-
-app.patch(`${API_PREFIX}/reservation/admin/:reservationId/status`, adminRequired, asyncRoute(async (req, res) => {
-  const result = await collections.reservations.updateOne({ _id: objectId(req.params.reservationId) }, { $set: { status: req.query.status, updated_at: now() } });
-  if (!result.matchedCount) return res.status(404).json({ detail: "Reservation not found" });
+app.patch(`${API_PREFIX}/reservation/admin/:id/status`, adminRequired, asyncRoute(async (req, res) => {
+  await db.execute("UPDATE reservations SET status = ? WHERE id = ?", [req.query.status, req.params.id]);
   res.json({ success: true, message: `Reservation status updated to ${req.query.status}` });
 }));
-
-app.get(`${API_PREFIX}/reservation/:reservationId`, asyncRoute(async (req, res) => {
-  const reservation = await collections.reservations.findOne({ _id: objectId(req.params.reservationId) });
-  if (!reservation) return res.status(404).json({ detail: "Reservation not found" });
-  res.json({ success: true, reservation: serialize(reservation) });
+app.get(`${API_PREFIX}/reservation/:id`, asyncRoute(async (req, res) => {
+  const [rows] = await db.execute("SELECT * FROM reservations WHERE id = ? LIMIT 1", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ detail: "Reservation not found" });
+  res.json({ success: true, reservation: publicReservation(rows[0]) });
 }));
 
-async function checkAvailability(date, time, guests) {
-  if (!date || !time || !guests) return { available: false, error: "Missing date, time, or guests" };
-  if (guests > settings.maxGuests) return { available: false, error: `Maximum ${settings.maxGuests} guests per table` };
-  const existing = await collections.reservations.countDocuments({ date, time, status: { $in: ["confirmed", "pending"] } });
-  const tablesAvailable = Math.max(0, 10 - existing);
-  return { available: tablesAvailable > 0, tables_available: tablesAvailable, total_tables: 10 };
+async function payableAmount(amount, orderId, reservationId) {
+  if (orderId) { const [rows] = await db.execute("SELECT total FROM orders WHERE id = ?", [orderId]); return rows[0] ? Number(rows[0].total) : null; }
+  if (reservationId) { const [rows] = await db.execute("SELECT preorder_total FROM reservations WHERE id = ?", [reservationId]); return rows[0] ? Number(rows[0].preorder_total) : null; }
+  return amount ? Number(amount) : null;
 }
-
 app.post(`${API_PREFIX}/payment/create-order`, authOptional, asyncRoute(async (req, res) => {
-  const amount = await resolvePayableAmount(req.body.amount, req.body.order_id, req.body.reservation_id);
+  const amount = await payableAmount(req.body.amount, req.body.order_id, req.body.reservation_id);
   if (!amount || amount <= 0) return res.status(400).json({ detail: "No payable amount found" });
-  const razorpayOrder = await razorpay.orders.create({ amount: Math.round(amount * 100), currency: "INR", payment_capture: 1, notes: req.body.notes || {} });
-  const payment = { razorpay_order_id: razorpayOrder.id, amount, currency: "INR", status: "created", order_id: req.body.order_id || null, reservation_id: req.body.reservation_id || null, notes: req.body.notes || {}, created_at: now() };
-  await collections.payments.insertOne(payment);
-  res.json({ razorpay_order_id: razorpayOrder.id, razorpay_key: process.env.RAZORPAY_KEY_ID, amount: Math.round(amount * 100), currency: "INR", order_id: req.body.order_id || null, reservation_id: req.body.reservation_id || null });
+  const rp = await razorpay.orders.create({ amount: Math.round(amount * 100), currency: "INR", payment_capture: 1, notes: req.body.notes || {} });
+  await db.execute("INSERT INTO payments (razorpay_order_id,amount,currency,status,order_id,reservation_id,notes) VALUES (?,?, 'INR','created',?,?,?)", [rp.id, amount, req.body.order_id || null, req.body.reservation_id || null, JSON.stringify(req.body.notes || {})]);
+  res.json({ razorpay_order_id: rp.id, razorpay_key: process.env.RAZORPAY_KEY_ID, amount: Math.round(amount * 100), currency: "INR", order_id: req.body.order_id || null, reservation_id: req.body.reservation_id || null });
 }));
-
 app.post(`${API_PREFIX}/payment/verify`, authOptional, asyncRoute(async (req, res) => {
-  const signatureText = `${req.body.razorpay_order_id}|${req.body.razorpay_payment_id}`;
-  const expected = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET).update(signatureText).digest("hex");
-  if (!safeCompare(expected, req.body.razorpay_signature)) {
-    return res.status(400).json({ detail: "Invalid payment signature" });
-  }
-  const payment = await collections.payments.findOne({ razorpay_order_id: req.body.razorpay_order_id });
-  if (!payment) return res.status(400).json({ detail: "Payment order not found" });
-  if (req.body.order_id && payment.order_id !== req.body.order_id) return res.status(400).json({ detail: "Payment does not match order" });
-  if (req.body.reservation_id && payment.reservation_id !== req.body.reservation_id) return res.status(400).json({ detail: "Payment does not match reservation" });
-  await collections.payments.updateOne({ _id: payment._id }, { $set: { razorpay_payment_id: req.body.razorpay_payment_id, razorpay_signature: req.body.razorpay_signature, status: "paid", verified_at: now() } });
+  const expected = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET).update(`${req.body.razorpay_order_id}|${req.body.razorpay_payment_id}`).digest("hex");
+  if (!safeCompare(expected, req.body.razorpay_signature)) return res.status(400).json({ detail: "Invalid payment signature" });
+  const [rows] = await db.execute("SELECT * FROM payments WHERE razorpay_order_id = ? LIMIT 1", [req.body.razorpay_order_id]);
+  if (!rows[0]) return res.status(400).json({ detail: "Payment order not found" });
+  if (req.body.order_id && String(rows[0].order_id) !== String(req.body.order_id)) return res.status(400).json({ detail: "Payment does not match order" });
+  if (req.body.reservation_id && String(rows[0].reservation_id) !== String(req.body.reservation_id)) return res.status(400).json({ detail: "Payment does not match reservation" });
+  await db.execute("UPDATE payments SET razorpay_payment_id=?, razorpay_signature=?, status='paid', verified_at=NOW() WHERE id=?", [req.body.razorpay_payment_id, req.body.razorpay_signature, rows[0].id]);
   if (req.body.order_id) {
-    const id = objectId(req.body.order_id);
-    const order = await collections.orders.findOne({ _id: id });
-    await collections.orders.updateOne({ _id: id }, { $set: { payment_status: "paid", payment_id: req.body.razorpay_payment_id, status: "confirmed", updated_at: now() } });
-    if (order) await saveCart(order.user_id, []);
+    await db.execute("UPDATE orders SET payment_status='paid', payment_id=?, status='confirmed' WHERE id=?", [req.body.razorpay_payment_id, req.body.order_id]);
+    const [orders] = await db.execute("SELECT user_id FROM orders WHERE id=?", [req.body.order_id]);
+    if (orders[0]) await saveCart(orders[0].user_id, []);
   }
-  if (req.body.reservation_id) {
-    await collections.reservations.updateOne({ _id: objectId(req.body.reservation_id) }, { $set: { payment_status: "paid", payment_id: req.body.razorpay_payment_id, status: "confirmed", updated_at: now() } });
-  }
+  if (req.body.reservation_id) await db.execute("UPDATE reservations SET payment_status='paid', payment_id=?, status='confirmed' WHERE id=?", [req.body.razorpay_payment_id, req.body.reservation_id]);
   res.json({ success: true, message: "Payment verified successfully" });
 }));
-
-async function resolvePayableAmount(requestedAmount, orderId, reservationId) {
-  if (orderId) {
-    const order = await collections.orders.findOne({ _id: objectId(orderId) });
-    return order ? Number(order.total) : null;
-  }
-  if (reservationId) {
-    const reservation = await collections.reservations.findOne({ _id: objectId(reservationId) });
-    return reservation ? Number(reservation.preorder_total || 0) : null;
-  }
-  return requestedAmount ? Number(requestedAmount) : null;
-}
-
 async function paymentWebhook(req, res, next) {
   try {
-    const signature = req.headers["x-razorpay-signature"];
-    const body = req.body;
     if (process.env.RAZORPAY_WEBHOOK_SECRET) {
-      const expected = crypto.createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET).update(body).digest("hex");
-      if (!signature || !safeCompare(expected, signature)) {
-        return res.status(400).json({ detail: "Invalid webhook signature" });
-      }
+      const sig = req.headers["x-razorpay-signature"];
+      const expected = crypto.createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET).update(req.body).digest("hex");
+      if (!sig || !safeCompare(expected, sig)) return res.status(400).json({ detail: "Invalid webhook signature" });
     }
-    const event = JSON.parse(body.toString("utf8"));
-    const orderId = event && event.payload && event.payload.payment && event.payload.payment.entity && event.payload.payment.entity.order_id;
-    if (orderId && collections) {
-      await collections.payments.updateOne({ razorpay_order_id: orderId }, { $set: { last_webhook_event: event.event, last_webhook_at: now(), webhook_payload: event } });
-    }
-    return res.json({ status: "received" });
-  } catch (error) {
-    return next(error);
-  }
+    const event = JSON.parse(req.body.toString("utf8"));
+    const orderId = event?.payload?.payment?.entity?.order_id;
+    if (orderId && db) await db.execute("UPDATE payments SET last_webhook_event=?, webhook_payload=? WHERE razorpay_order_id=?", [event.event || null, JSON.stringify(event), orderId]);
+    res.json({ status: "received" });
+  } catch (e) { next(e); }
 }
 
-app.get(`${API_PREFIX}/user/profile`, authRequired, (req, res) => {
-  const user = { ...req.user };
-  delete user.password_hash;
-  delete user.salt;
-  res.json(serialize({ id: user._id, phone: user.phone, name: user.name, email: user.email, dob: user.dob, addresses: user.addresses || [], created_at: user.created_at, is_active: user.is_active !== false }));
-});
-
+app.get(`${API_PREFIX}/user/profile`, authRequired, (req, res) => res.json({ id: idString(req.user.id), phone: req.user.phone, name: req.user.name, email: req.user.email, dob: req.user.dob, addresses: toJson(req.user.addresses, []), created_at: req.user.created_at, is_active: Boolean(req.user.is_active) }));
 app.put(`${API_PREFIX}/user/profile`, authRequired, asyncRoute(async (req, res) => {
-  const update = {};
-  if (req.body.name) update.name = String(req.body.name).trim();
-  if (req.body.email) update.email = String(req.body.email).toLowerCase().trim();
-  if (req.body.dob) update.dob = req.body.dob;
-  update.updated_at = now();
-  const result = await collections.users.findOneAndUpdate({ _id: req.user._id }, { $set: update }, { returnDocument: "after" });
-  const user = result;
-  res.json({ success: true, message: "Profile updated successfully", user: serialize({ id: user._id, phone: user.phone, name: user.name, email: user.email, dob: user.dob, addresses: user.addresses || [], created_at: user.created_at, is_active: user.is_active !== false }) });
+  await db.execute("UPDATE users SET name=COALESCE(?,name), email=COALESCE(?,email), dob=COALESCE(?,dob) WHERE id=?", [req.body.name || null, req.body.email || null, req.body.dob || null, req.user.id]);
+  const user = await getUserById(req.user.id);
+  res.json({ success: true, message: "Profile updated successfully", user: { id: idString(user.id), phone: user.phone, name: user.name, email: user.email, dob: user.dob, addresses: toJson(user.addresses, []), created_at: user.created_at, is_active: Boolean(user.is_active) } });
 }));
-
 app.get(`${API_PREFIX}/user/orders`, authRequired, asyncRoute(async (req, res) => {
-  const orders = await collections.orders.find({ user_id: req.user._id }).sort({ created_at: -1 }).toArray();
-  res.json({ success: true, orders: serialize(orders), total: orders.length });
+  const [rows] = await db.execute("SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC", [req.user.id]);
+  res.json({ success: true, orders: rows.map(publicOrder), total: rows.length });
 }));
-
 app.get(`${API_PREFIX}/user/reservations`, authRequired, asyncRoute(async (req, res) => {
-  const reservations = await collections.reservations.find({ user_id: req.user._id }).sort({ created_at: -1 }).toArray();
-  res.json({ success: true, reservations: serialize(reservations), total: reservations.length });
+  const [rows] = await db.execute("SELECT * FROM reservations WHERE user_id=? ORDER BY created_at DESC", [req.user.id]);
+  res.json({ success: true, reservations: rows.map(publicReservation), total: rows.length });
 }));
 
 app.get(`${API_PREFIX}/admin/dashboard`, adminRequired, asyncRoute(async (_req, res) => {
-  const totalUsers = await collections.users.countDocuments({});
-  const totalOrders = await collections.orders.countDocuments({});
-  const totalReservations = await collections.reservations.countDocuments({});
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayOrders = await collections.orders.countDocuments({ created_at: { $gte: today } });
-  const paidOrders = await collections.orders.find({ payment_status: "paid" }).toArray();
-  const totalRevenue = paidOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
-  const recentOrders = await collections.orders.find().sort({ created_at: -1 }).limit(5).toArray();
-  res.json({ success: true, stats: { total_users: totalUsers, total_orders: totalOrders, total_reservations: totalReservations, today_orders: todayOrders, total_revenue: totalRevenue, avg_order_value: paidOrders.length ? totalRevenue / paidOrders.length : 0, today_revenue: 0 }, recent_orders: serialize(recentOrders) });
+  const [[u]] = await db.query("SELECT COUNT(*) total FROM users");
+  const [[o]] = await db.query("SELECT COUNT(*) total FROM orders");
+  const [[r]] = await db.query("SELECT COUNT(*) total FROM reservations");
+  const [[to]] = await db.query("SELECT COUNT(*) total FROM orders WHERE DATE(created_at)=CURDATE()");
+  const [[rev]] = await db.query("SELECT COALESCE(SUM(total),0) total_revenue, COALESCE(AVG(total),0) avg_order_value FROM orders WHERE payment_status='paid'");
+  const [recent] = await db.query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 5");
+  res.json({ success: true, stats: { total_users: u.total, total_orders: o.total, total_reservations: r.total, today_orders: to.total, total_revenue: Number(rev.total_revenue), avg_order_value: Number(rev.avg_order_value), today_revenue: 0 }, recent_orders: recent.map(publicOrder) });
 }));
-
 app.get(`${API_PREFIX}/admin/sales-summary`, adminRequired, asyncRoute(async (_req, res) => {
-  const rows = await collections.orders.aggregate([{ $match: { payment_status: "paid" } }, { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$created_at" } }, revenue: { $sum: "$total" }, orders: { $sum: 1 } } }, { $sort: { _id: 1 } }, { $limit: 30 }]).toArray();
-  const topItems = await collections.orders.aggregate([{ $unwind: "$items" }, { $group: { _id: "$items.name", total_quantity: { $sum: "$items.quantity" }, total_revenue: { $sum: { $multiply: ["$items.price", "$items.quantity"] } } } }, { $sort: { total_quantity: -1 } }, { $limit: 5 }]).toArray();
-  res.json({ success: true, sales_data: rows, top_items: topItems });
+  const [sales] = await db.query("SELECT DATE(created_at) _id, SUM(total) revenue, COUNT(*) orders FROM orders WHERE payment_status='paid' GROUP BY DATE(created_at) ORDER BY _id LIMIT 30");
+  res.json({ success: true, sales_data: sales, top_items: [] });
 }));
-
 app.get(`${API_PREFIX}/admin/users`, adminRequired, asyncRoute(async (req, res) => {
-  const page = Math.max(1, Number(req.query.page || 1));
-  const perPage = Math.min(100, Math.max(1, Number(req.query.per_page || 20)));
-  const query = req.query.search ? { $or: [{ phone: { $regex: req.query.search, $options: "i" } }, { name: { $regex: req.query.search, $options: "i" } }, { email: { $regex: req.query.search, $options: "i" } }] } : {};
-  const total = await collections.users.countDocuments(query);
-  const users = await collections.users.find(query).skip((page - 1) * perPage).limit(perPage).toArray();
-  for (const user of users) {
-    delete user.password_hash;
-    delete user.salt;
-    user.order_count = await collections.orders.countDocuments({ user_id: user._id });
-  }
-  res.json({ success: true, users: serialize(users), total, page, per_page: perPage, total_pages: Math.ceil(total / perPage) });
+  const page = Math.max(1, Number(req.query.page || 1)); const per = Math.min(100, Math.max(1, Number(req.query.per_page || 20)));
+  const search = req.query.search ? `%${req.query.search}%` : null;
+  const where = search ? "WHERE phone LIKE ? OR name LIKE ? OR email LIKE ?" : "";
+  const params = search ? [search, search, search] : [];
+  const [[count]] = await db.query(`SELECT COUNT(*) total FROM users ${where}`, params);
+  const [rows] = await db.query(`SELECT id,phone,email,name,dob,addresses,is_active,is_admin,created_at,updated_at FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`, [...params, per, (page - 1) * per]);
+  res.json({ success: true, users: rows.map((u) => ({ ...u, _id: idString(u.id), order_count: 0, addresses: toJson(u.addresses, []) })), total: count.total, page, per_page: per, total_pages: Math.ceil(count.total / per) });
 }));
-
 app.get(`${API_PREFIX}/admin/customer-stats`, adminRequired, asyncRoute(async (_req, res) => {
-  const total = await collections.users.countDocuments({});
-  const active = await collections.users.countDocuments({ is_active: { $ne: false } });
-  const withOrders = (await collections.orders.distinct("user_id")).length;
-  res.json({ success: true, stats: { total, active, inactive: total - active, with_orders: withOrders } });
+  const [[t]] = await db.query("SELECT COUNT(*) total FROM users"); const [[a]] = await db.query("SELECT COUNT(*) total FROM users WHERE is_active=1"); const [[w]] = await db.query("SELECT COUNT(DISTINCT user_id) total FROM orders");
+  res.json({ success: true, stats: { total: t.total, active: a.total, inactive: t.total - a.total, with_orders: w.total } });
 }));
-
-app.patch(`${API_PREFIX}/admin/users/:userId/status`, adminRequired, asyncRoute(async (req, res) => {
-  const result = await collections.users.updateOne({ _id: objectId(req.params.userId) }, { $set: { is_active: Boolean(req.body.is_active), updated_at: now() } });
-  if (!result.matchedCount) return res.status(404).json({ detail: "User not found" });
+app.patch(`${API_PREFIX}/admin/users/:id/status`, adminRequired, asyncRoute(async (req, res) => {
+  await db.execute("UPDATE users SET is_active=? WHERE id=?", [req.body.is_active ? 1 : 0, req.params.id]);
   res.json({ success: true, message: "Customer status updated" });
 }));
-
-app.get(`${API_PREFIX}/admin/users/:userId/orders`, adminRequired, asyncRoute(async (req, res) => {
-  const orders = await collections.orders.find({ user_id: objectId(req.params.userId) }).sort({ created_at: -1 }).toArray();
-  res.json({ success: true, orders: serialize(orders), total: orders.length });
+app.get(`${API_PREFIX}/admin/users/:id/orders`, adminRequired, asyncRoute(async (req, res) => {
+  const [rows] = await db.execute("SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC", [req.params.id]);
+  res.json({ success: true, orders: rows.map(publicOrder), total: rows.length });
 }));
-
-app.get(`${API_PREFIX}/admin/users/:userId/reservations`, adminRequired, asyncRoute(async (req, res) => {
-  const reservations = await collections.reservations.find({ user_id: objectId(req.params.userId) }).sort({ created_at: -1 }).toArray();
-  res.json({ success: true, reservations: serialize(reservations), total: reservations.length });
+app.get(`${API_PREFIX}/admin/users/:id/reservations`, adminRequired, asyncRoute(async (req, res) => {
+  const [rows] = await db.execute("SELECT * FROM reservations WHERE user_id=? ORDER BY created_at DESC", [req.params.id]);
+  res.json({ success: true, reservations: rows.map(publicReservation), total: rows.length });
 }));
-
 app.get(`${API_PREFIX}/admin/order-stats`, adminRequired, asyncRoute(async (_req, res) => {
-  const rows = await collections.orders.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]).toArray();
-  res.json({ success: true, stats: Object.fromEntries(rows.map((row) => [row._id, row.count])), total: await collections.orders.countDocuments({}) });
+  const [rows] = await db.query("SELECT status _id, COUNT(*) count FROM orders GROUP BY status");
+  res.json({ success: true, stats: Object.fromEntries(rows.map((r) => [r._id, r.count])), total: rows.reduce((s, r) => s + r.count, 0) });
 }));
-
 app.get(`${API_PREFIX}/admin/settings`, adminRequired, asyncRoute(async (_req, res) => {
-  const doc = await collections.settings.findOne({ _id: "restaurant" });
-  res.json({ success: true, settings: serialize(doc || { _id: "restaurant", restaurantName: settings.restaurantName, deliveryFee: settings.deliveryFee, freeDeliveryThreshold: settings.freeDeliveryThreshold, maxGuests: settings.maxGuests }) });
+  const [rows] = await db.execute("SELECT data FROM settings WHERE id='restaurant'");
+  res.json({ success: true, settings: toJson(rows[0]?.data, { restaurantName: settings.restaurantName, deliveryFee: settings.deliveryFee, freeDeliveryThreshold: settings.freeDeliveryThreshold, maxGuests: settings.maxGuests }) });
 }));
-
 app.put(`${API_PREFIX}/admin/settings`, adminRequired, asyncRoute(async (req, res) => {
-  await collections.settings.updateOne({ _id: "restaurant" }, { $set: { ...req.body, updated_at: now() } }, { upsert: true });
-  res.json({ success: true, settings: serialize(await collections.settings.findOne({ _id: "restaurant" })) });
+  await db.execute("INSERT INTO settings (id,data) VALUES ('restaurant',?) ON DUPLICATE KEY UPDATE data=VALUES(data)", [JSON.stringify(req.body)]);
+  res.json({ success: true, settings: req.body });
 }));
-
 for (const key of ["business-hours", "delivery", "notifications"]) {
   app.get(`${API_PREFIX}/admin/settings/${key}`, adminRequired, asyncRoute(async (_req, res) => {
-    const doc = await collections.settings.findOne({ _id: key });
-    res.json({ success: true, [key.replace("-", "_")]: serialize(doc || { _id: key }) });
+    const [rows] = await db.execute("SELECT data FROM settings WHERE id=?", [key]);
+    res.json({ success: true, [key.replace("-", "_")]: toJson(rows[0]?.data, { id: key }) });
   }));
   app.put(`${API_PREFIX}/admin/settings/${key}`, adminRequired, asyncRoute(async (req, res) => {
-    await collections.settings.updateOne({ _id: key }, { $set: { ...req.body, updated_at: now() } }, { upsert: true });
-    res.json({ success: true, [key.replace("-", "_")]: serialize(await collections.settings.findOne({ _id: key })) });
+    await db.execute("INSERT INTO settings (id,data) VALUES (?,?) ON DUPLICATE KEY UPDATE data=VALUES(data)", [key, JSON.stringify(req.body)]);
+    res.json({ success: true, [key.replace("-", "_")]: req.body });
   }));
 }
-
 app.get(`${API_PREFIX}/admin/offers`, adminRequired, asyncRoute(async (_req, res) => {
-  const offers = await collections.offers.find().sort({ created_at: -1 }).toArray();
-  res.json({ success: true, offers: serialize(offers) });
+  const [rows] = await db.query("SELECT * FROM offers ORDER BY created_at DESC");
+  res.json({ success: true, offers: rows.map((o) => ({ ...o, _id: idString(o.id), data: toJson(o.data, {}) })) });
 }));
-
 app.get(`${API_PREFIX}/admin/offers/active`, asyncRoute(async (_req, res) => {
-  const offers = await collections.offers.find({ is_active: { $ne: false } }).sort({ created_at: -1 }).toArray();
-  res.json({ success: true, offers: serialize(offers) });
+  const [rows] = await db.query("SELECT * FROM offers WHERE is_active=1 ORDER BY created_at DESC");
+  res.json({ success: true, offers: rows.map((o) => ({ ...o, _id: idString(o.id), data: toJson(o.data, {}) })) });
 }));
-
 app.post(`${API_PREFIX}/admin/offers`, adminRequired, asyncRoute(async (req, res) => {
-  const offer = { ...req.body, is_active: req.body.is_active !== false, created_at: now(), updated_at: now() };
-  const result = await collections.offers.insertOne(offer);
-  offer._id = result.insertedId;
-  res.json({ success: true, offer: serialize(offer) });
+  const [result] = await db.execute("INSERT INTO offers (title,description,discount_type,discount_value,is_active,data) VALUES (?,?,?,?,?,?)", [req.body.title || "Offer", req.body.description || null, req.body.discount_type || null, req.body.discount_value || null, req.body.is_active === false ? 0 : 1, JSON.stringify(req.body)]);
+  res.json({ success: true, offer: { ...req.body, id: idString(result.insertId), _id: idString(result.insertId) } });
 }));
-
-app.put(`${API_PREFIX}/admin/offers/:offerId`, adminRequired, asyncRoute(async (req, res) => {
-  const result = await collections.offers.findOneAndUpdate({ _id: objectId(req.params.offerId) }, { $set: { ...req.body, updated_at: now() } }, { returnDocument: "after" });
-  if (!result) return res.status(404).json({ detail: "Offer not found" });
-  res.json({ success: true, offer: serialize(result) });
+app.put(`${API_PREFIX}/admin/offers/:id`, adminRequired, asyncRoute(async (req, res) => {
+  await db.execute("UPDATE offers SET title=COALESCE(?,title), description=COALESCE(?,description), is_active=COALESCE(?,is_active), data=? WHERE id=?", [req.body.title || null, req.body.description || null, req.body.is_active === undefined ? null : (req.body.is_active ? 1 : 0), JSON.stringify(req.body), req.params.id]);
+  res.json({ success: true, offer: { ...req.body, id: req.params.id, _id: req.params.id } });
 }));
-
-app.patch(`${API_PREFIX}/admin/offers/:offerId/toggle`, adminRequired, asyncRoute(async (req, res) => {
-  const offer = await collections.offers.findOne({ _id: objectId(req.params.offerId) });
-  if (!offer) return res.status(404).json({ detail: "Offer not found" });
-  const result = await collections.offers.findOneAndUpdate({ _id: offer._id }, { $set: { is_active: offer.is_active === false, updated_at: now() } }, { returnDocument: "after" });
-  res.json({ success: true, offer: serialize(result) });
+app.patch(`${API_PREFIX}/admin/offers/:id/toggle`, adminRequired, asyncRoute(async (req, res) => {
+  await db.execute("UPDATE offers SET is_active=IF(is_active=1,0,1) WHERE id=?", [req.params.id]);
+  res.json({ success: true, message: "Offer updated" });
 }));
-
-app.delete(`${API_PREFIX}/admin/offers/:offerId`, adminRequired, asyncRoute(async (req, res) => {
-  const result = await collections.offers.deleteOne({ _id: objectId(req.params.offerId) });
-  if (!result.deletedCount) return res.status(404).json({ detail: "Offer not found" });
+app.delete(`${API_PREFIX}/admin/offers/:id`, adminRequired, asyncRoute(async (req, res) => {
+  await db.execute("DELETE FROM offers WHERE id=?", [req.params.id]);
   res.json({ success: true, message: "Offer deleted" });
 }));
-
 app.get(`${API_PREFIX}/admin/reviews`, adminRequired, asyncRoute(async (_req, res) => {
-  const reviews = await collections.reviews.find().sort({ created_at: -1 }).toArray();
-  res.json({ success: true, reviews: serialize(reviews), total: reviews.length });
+  const [rows] = await db.query("SELECT * FROM reviews ORDER BY created_at DESC");
+  res.json({ success: true, reviews: rows.map((r) => ({ ...r, _id: idString(r.id) })), total: rows.length });
 }));
-
 app.get(`${API_PREFIX}/admin/reviews/pending`, adminRequired, asyncRoute(async (_req, res) => {
-  const reviews = await collections.reviews.find({ approved: { $ne: true } }).sort({ created_at: -1 }).toArray();
-  res.json({ success: true, reviews: serialize(reviews), total: reviews.length });
+  const [rows] = await db.query("SELECT * FROM reviews WHERE approved=0 ORDER BY created_at DESC");
+  res.json({ success: true, reviews: rows.map((r) => ({ ...r, _id: idString(r.id) })), total: rows.length });
 }));
-
 app.get(`${API_PREFIX}/admin/review-stats`, adminRequired, asyncRoute(async (_req, res) => {
-  const total = await collections.reviews.countDocuments({});
-  const pending = await collections.reviews.countDocuments({ approved: { $ne: true } });
-  const approved = await collections.reviews.countDocuments({ approved: true });
-  res.json({ success: true, stats: { total, pending, approved } });
+  const [[t]] = await db.query("SELECT COUNT(*) total FROM reviews"); const [[p]] = await db.query("SELECT COUNT(*) total FROM reviews WHERE approved=0"); const [[a]] = await db.query("SELECT COUNT(*) total FROM reviews WHERE approved=1");
+  res.json({ success: true, stats: { total: t.total, pending: p.total, approved: a.total } });
 }));
-
-app.patch(`${API_PREFIX}/admin/reviews/:reviewId/approve`, adminRequired, asyncRoute(async (req, res) => {
-  await collections.reviews.updateOne({ _id: objectId(req.params.reviewId) }, { $set: { approved: true, updated_at: now() } });
-  res.json({ success: true, message: "Review approved" });
-}));
-
-app.patch(`${API_PREFIX}/admin/reviews/:reviewId/reject`, adminRequired, asyncRoute(async (req, res) => {
-  await collections.reviews.updateOne({ _id: objectId(req.params.reviewId) }, { $set: { approved: false, rejected: true, updated_at: now() } });
-  res.json({ success: true, message: "Review rejected" });
-}));
-
-app.delete(`${API_PREFIX}/admin/reviews/:reviewId`, adminRequired, asyncRoute(async (req, res) => {
-  await collections.reviews.deleteOne({ _id: objectId(req.params.reviewId) });
-  res.json({ success: true, message: "Review deleted" });
-}));
+app.patch(`${API_PREFIX}/admin/reviews/:id/approve`, adminRequired, asyncRoute(async (req, res) => { await db.execute("UPDATE reviews SET approved=1 WHERE id=?", [req.params.id]); res.json({ success: true, message: "Review approved" }); }));
+app.patch(`${API_PREFIX}/admin/reviews/:id/reject`, adminRequired, asyncRoute(async (req, res) => { await db.execute("UPDATE reviews SET approved=0,rejected=1 WHERE id=?", [req.params.id]); res.json({ success: true, message: "Review rejected" }); }));
+app.delete(`${API_PREFIX}/admin/reviews/:id`, adminRequired, asyncRoute(async (req, res) => { await db.execute("DELETE FROM reviews WHERE id=?", [req.params.id]); res.json({ success: true, message: "Review deleted" }); }));
 
 if (staticDir) {
   app.get("*", (req, res, next) => {
@@ -959,37 +819,33 @@ if (staticDir) {
     return res.sendFile(path.join(staticDir, "index.html"));
   });
 }
-
 app.use((req, res) => res.status(404).json({ detail: "Not found" }));
-
-app.use((error, _req, res, _next) => {
-  console.error(error);
-  res.status(error.status || 500).json({ detail: error.message || "Internal server error" });
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(err.status || 500).json({ detail: err.message || "Internal server error" });
 });
 
 async function start() {
-  const client = new MongoClient(process.env.MONGODB_URI);
-  await client.connect();
-  db = client.db(settings.dbName);
-  collections = {
-    users: db.collection("users"),
-    admins: db.collection("admins"),
-    menu_items: db.collection("menu_items"),
-    carts: db.collection("carts"),
-    orders: db.collection("orders"),
-    reservations: db.collection("reservations"),
-    payments: db.collection("payments"),
-    reviews: db.collection("reviews"),
-    offers: db.collection("offers"),
-    settings: db.collection("settings")
-  };
+  const required = ["MYSQL_HOST", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DATABASE", "JWT_SECRET", "ADMIN_JWT_SECRET", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"];
+  const missing = required.filter((key) => !process.env[key]);
+  if (missing.length) throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+  db = await mysql.createPool({
+    host: process.env.MYSQL_HOST,
+    port: Number(process.env.MYSQL_PORT || 3306),
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DATABASE,
+    waitForConnections: true,
+    connectionLimit: Number(process.env.MYSQL_POOL_LIMIT || 10),
+    namedPlaceholders: false
+  });
   razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
-  await ensureIndexes();
-  await ensureDefaultAdmin();
-  app.listen(PORT, () => console.log(`Cheesy Crust Node API listening on ${PORT}`));
+  await migrate();
+  await ensureAdmin();
+  app.listen(PORT, () => console.log(`Cheesy Crust MySQL API listening on ${PORT}`));
 }
 
-start().catch((error) => {
-  console.error("Failed to start API", error);
+start().catch((err) => {
+  console.error("Failed to start API", err);
   process.exit(1);
 });

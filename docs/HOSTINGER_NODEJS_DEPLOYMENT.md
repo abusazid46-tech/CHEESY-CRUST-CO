@@ -1,6 +1,6 @@
 # Hostinger Node.js Deployment
 
-Use `backend-node` for Hostinger Node.js hosting. The older `backend` folder is the previous Python/FastAPI implementation and should be treated as legacy unless you deploy on a Python-capable VPS.
+Use `backend-node` for Hostinger Node.js hosting. This backend uses Hostinger MySQL/MariaDB through `mysql2`. The older `backend` folder is the previous Python/FastAPI implementation and should be treated as legacy unless you deploy on a Python-capable VPS.
 
 ## App Settings
 
@@ -18,8 +18,12 @@ Copy `backend-node/.env.example` to Hostinger environment variables, or create a
 Required values:
 
 ```bash
-MONGODB_URI=
-MONGODB_DB_NAME=cheesy_crust
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_DATABASE=
+MYSQL_USER=
+MYSQL_PASSWORD=
+MYSQL_POOL_LIMIT=10
 JWT_SECRET=
 ADMIN_JWT_SECRET=
 ADMIN_EMAIL=
@@ -29,6 +33,8 @@ RAZORPAY_KEY_SECRET=
 RAZORPAY_WEBHOOK_SECRET=
 CORS_ORIGINS=https://whitesmoke-jay-438498.hostingersite.com
 ```
+
+Create the database and user in Hostinger hPanel first, then copy the exact database name, username, password, and host into the Node app `.env`. The app creates its own tables on first start.
 
 ## Install And Start Over SSH
 
@@ -74,7 +80,7 @@ Expected health response includes:
 ```json
 {
   "status": "healthy",
-  "database": "connected",
+  "database": "mysql-connected",
   "runtime": "nodejs"
 }
 ```
