@@ -52,13 +52,9 @@ async def create_indexes():
     try:
         # Users collection indexes
         await db.users.create_index("phone", unique=True)
-        await db.users.create_index("email", sparse=True)
+        await db.users.create_index("email", unique=True, sparse=True)
         await db.admins.create_index("email", unique=True)
         await db.admin_sessions.create_index("admin_id")
-        # OTP sessions - TTL index for auto-expiry
-        await db.otp_sessions.create_index("expires_at", expireAfterSeconds=0)
-        await db.otp_sessions.create_index("phone")
-        
         # Menu items indexes
         await db.menu_items.create_index("slug", unique=True)
         await db.menu_items.create_index("category")
@@ -110,9 +106,6 @@ class Collections:
         return db.users
     
     @property
-    def otp_sessions(self):
-        return db.otp_sessions
-    
     @property
     def menu_items(self):
         return db.menu_items

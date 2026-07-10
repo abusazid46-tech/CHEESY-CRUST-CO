@@ -4,16 +4,15 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from bson import ObjectId
 
 from database import get_database
-from services.auth_service import AuthService
+from utils.security import decode_token
 
 security = HTTPBearer()
-auth_service = AuthService()
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Get current user from JWT token"""
     token = credentials.credentials
     
-    payload = await auth_service.verify_jwt_token(token)
+    payload = decode_token(token)
     
     if not payload:
         raise HTTPException(
@@ -22,7 +21,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    user_id = payload.get("user_id")
+    user_id = payload.get("sub")
     
     if not user_id:
         raise HTTPException(

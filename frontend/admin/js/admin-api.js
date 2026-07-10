@@ -2,7 +2,7 @@
 const ADMIN_API_BASE = window.ADMIN_API_BASE || (
     ['localhost', '127.0.0.1'].includes(window.location.hostname)
         ? 'http://localhost:8000/api/v1'
-        : 'https://cheesy-crust-api.onrender.com/api/v1'
+        : `${window.location.origin}/api/v1`
 );
 
 class AdminApiService {

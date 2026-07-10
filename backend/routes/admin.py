@@ -131,6 +131,8 @@ async def get_all_users(
     
     for user in users:
         user["_id"] = str(user["_id"])
+        user.pop("password_hash", None)
+        user.pop("salt", None)
         user["order_count"] = await collections.orders.count_documents({"user_id": ObjectId(user["_id"])})
     
     return {

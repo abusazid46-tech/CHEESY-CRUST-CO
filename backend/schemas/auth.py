@@ -2,13 +2,16 @@
 Authentication request/response schemas
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 
 
-class SendOTPRequest(BaseModel):
-    """Request schema for sending OTP"""
-    phone: str = Field(..., description="Phone number with country code")
+class RegisterRequest(BaseModel):
+    """Request schema for email/mobile/password registration"""
+    name: str = Field(..., min_length=2, max_length=50)
+    email: EmailStr
+    phone: str = Field(..., description="Mobile number with country code")
+    password: str = Field(..., min_length=8, max_length=128)
     
     @field_validator("phone")
     @classmethod
@@ -20,18 +23,10 @@ class SendOTPRequest(BaseModel):
         return v
 
 
-class SendOTPResponse(BaseModel):
-    """Response schema for OTP send"""
-    success: bool = True
-    message: str = "OTP sent successfully"
-    phone: str
-    expires_in: int = 300  # seconds
-
-
-class VerifyOTPRequest(BaseModel):
-    """Request schema for OTP verification"""
-    phone: str
-    otp: str = Field(..., min_length=6, max_length=6)
+class LoginRequest(BaseModel):
+    """Request schema for email/mobile/password login"""
+    identifier: str = Field(..., description="Email address or mobile number")
+    password: str = Field(..., min_length=1)
 
 
 class TokenResponse(BaseModel):
@@ -42,6 +37,7 @@ class TokenResponse(BaseModel):
     expires_in: int
     user_id: str
     phone: str
+    email: Optional[EmailStr] = None
     name: Optional[str] = None
     is_admin: bool = False
 

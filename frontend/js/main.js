@@ -715,6 +715,7 @@ function switchTab(tabId) {
 // Auth Modal Handlers
 function initAuthModal() {
     const authModal = new bootstrap.Modal(document.getElementById('authModal'));
+    let isRegisterMode = false;
     
     document.getElementById('loginIcon')?.addEventListener('click', () => {
         if (isAuthenticated()) {
@@ -724,58 +725,64 @@ function initAuthModal() {
         }
     });
     
-    document.getElementById('sendOtpBtn').addEventListener('click', async (event) => {
-        const phone = document.getElementById('phoneNumber').value;
-        if (!phone || phone.length < 10) {
-            document.getElementById('authMessage').innerText = 'Please enter a valid phone number';
+    const form = document.getElementById('customerAuthForm');
+    const toggleBtn = document.getElementById('authModeToggleBtn');
+    const submitBtn = document.getElementById('authSubmitBtn');
+    const message = document.getElementById('authMessage');
+    const nameField = document.getElementById('nameField');
+    const phoneField = document.getElementById('phoneField');
+
+    function setAuthMode(registerMode) {
+        isRegisterMode = registerMode;
+        nameField.style.display = registerMode ? 'block' : 'none';
+        phoneField.style.display = registerMode ? 'block' : 'none';
+        submitBtn.innerText = registerMode ? 'Create Account' : 'Sign In';
+        toggleBtn.innerText = registerMode ? 'I already have an account' : 'Create an account';
+        message.innerText = '';
+    }
+
+    toggleBtn?.addEventListener('click', () => setAuthMode(!isRegisterMode));
+
+    form?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const identifier = document.getElementById('authIdentifier').value.trim();
+        const password = document.getElementById('authPassword').value;
+        const name = document.getElementById('authName').value.trim();
+        const phone = document.getElementById('authPhone').value.trim();
+
+        if (!identifier || !password) {
+            message.innerText = 'Please enter your email/mobile and password.';
             return;
         }
-        
-        setLoading(event.currentTarget, true, 'Sending...');
-        try {
-            await api.sendOTP(phone);
-            document.getElementById('authMessage').innerText = 'OTP sent successfully. Enter the code sent to your phone.';
-            document.getElementById('phoneStep').style.display = 'none';
-            document.getElementById('otpStep').style.display = 'block';
-        } catch (error) {
-            document.getElementById('authMessage').innerText = error.message || 'Failed to send OTP';
-        } finally {
-            setLoading(event.currentTarget, false);
+        if (isRegisterMode && (!name || !phone || !identifier.includes('@') || password.length < 8)) {
+            message.innerText = 'Create account requires name, email, mobile number, and an 8+ character password.';
+            return;
         }
-    });
-    
-    document.getElementById('verifyOtpBtn').addEventListener('click', async (event) => {
-        const phone = document.getElementById('phoneNumber').value;
-        const otp = document.getElementById('otpInput').value;
-        
-        setLoading(event.currentTarget, true, 'Verifying...');
+
+        setLoading(submitBtn, true, isRegisterMode ? 'Creating...' : 'Signing in...');
         try {
-            const session = await api.verifyOTP(phone, otp);
-            localStorage.setItem('user_phone', session.phone || phone);
-            if (session.name) localStorage.setItem('user_name', session.name);
+            const session = isRegisterMode
+                ? await api.register({ name, email: identifier, phone, password })
+                : await api.login(identifier, password);
+            if (session.phone) localStorage.setItem(STORAGE_KEYS.userPhone, session.phone);
+            if (session.name) localStorage.setItem(STORAGE_KEYS.userName, session.name);
+            if (session.email) localStorage.setItem(STORAGE_KEYS.userEmail, session.email);
             updateAuthUI();
-            document.getElementById('otpStep').style.display = 'none';
+            form.style.display = 'none';
             document.getElementById('authSuccess').style.display = 'block';
             await updateCartCount();
-            
             setTimeout(() => {
                 authModal.hide();
-                document.getElementById('phoneStep').style.display = 'block';
-                document.getElementById('otpStep').style.display = 'none';
+                form.reset();
+                form.style.display = 'block';
                 document.getElementById('authSuccess').style.display = 'none';
-                document.getElementById('phoneNumber').value = '';
-                document.getElementById('otpInput').value = '';
-            }, 1500);
+                setAuthMode(false);
+            }, 1200);
         } catch (error) {
-            document.getElementById('authMessage').innerText = error.message || 'Invalid OTP';
+            message.innerText = error.message || 'Authentication failed';
         } finally {
-            setLoading(event.currentTarget, false);
+            setLoading(submitBtn, false);
         }
-    });
-    
-    document.getElementById('backToPhoneBtn').addEventListener('click', () => {
-        document.getElementById('phoneStep').style.display = 'block';
-        document.getElementById('otpStep').style.display = 'none';
     });
 }
 

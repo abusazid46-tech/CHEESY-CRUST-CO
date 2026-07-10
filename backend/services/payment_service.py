@@ -8,6 +8,7 @@ import hashlib
 import logging
 from typing import Optional, Tuple
 from datetime import datetime
+from bson import ObjectId
 
 from config.settings import settings
 from database import collections
@@ -26,13 +27,17 @@ class PaymentService:
     
     async def create_order(
         self,
-        amount: float,
+        amount: Optional[float] = None,
         order_id: Optional[str] = None,
         reservation_id: Optional[str] = None,
         notes: Optional[dict] = None
     ) -> Tuple[bool, dict]:
         """Create Razorpay order"""
         try:
+            amount = await self._resolve_payable_amount(amount, order_id, reservation_id)
+            if not amount or amount <= 0:
+                return False, {"error": "No payable amount found"}
+
             # Convert to paise
             amount_in_paise = int(amount * 100)
             
@@ -68,6 +73,20 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Razorpay order creation error: {e}")
             return False, {"error": str(e)}
+
+    async def _resolve_payable_amount(
+        self,
+        requested_amount: Optional[float],
+        order_id: Optional[str],
+        reservation_id: Optional[str],
+    ) -> Optional[float]:
+        if order_id:
+            order = await collections.orders.find_one({"_id": ObjectId(order_id)})
+            return float(order["total"]) if order else None
+        if reservation_id:
+            reservation = await collections.reservations.find_one({"_id": ObjectId(reservation_id)})
+            return float(reservation.get("preorder_total", 0)) if reservation else None
+        return float(requested_amount) if requested_amount else None
     
     def verify_signature(
         self,
@@ -106,9 +125,16 @@ class PaymentService:
         if not self.verify_signature(razorpay_payment_id, razorpay_order_id, razorpay_signature):
             return False, "Invalid payment signature"
         
-        # Update payment record
+        payment = await collections.payments.find_one({"razorpay_order_id": razorpay_order_id})
+        if not payment:
+            return False, "Payment order not found"
+        if order_id and payment.get("order_id") != order_id:
+            return False, "Payment does not match order"
+        if reservation_id and payment.get("reservation_id") != reservation_id:
+            return False, "Payment does not match reservation"
+
         await collections.payments.update_one(
-            {"razorpay_order_id": razorpay_order_id},
+            {"_id": payment["_id"]},
             {"$set": {
                 "razorpay_payment_id": razorpay_payment_id,
                 "razorpay_signature": razorpay_signature,
@@ -119,7 +145,6 @@ class PaymentService:
         
         # Update order payment status
         if order_id:
-            from bson import ObjectId
             order = await collections.orders.find_one({"_id": ObjectId(order_id)})
             await collections.orders.update_one(
                 {"_id": ObjectId(order_id)},
@@ -138,7 +163,6 @@ class PaymentService:
         
         # Update reservation payment status
         if reservation_id:
-            from bson import ObjectId
             await collections.reservations.update_one(
                 {"_id": ObjectId(reservation_id)},
                 {"$set": {

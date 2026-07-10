@@ -81,13 +81,18 @@ class ReservationService:
         
         if preorder_items:
             for item in preorder_items:
+                menu_item = await collections.menu_items.find_one({"_id": ObjectId(item["item_id"])})
+                if not menu_item or not menu_item.get("is_available", False):
+                    return False, None, "One or more pre-order items are unavailable"
+                quantity = int(item["quantity"])
+                price = float(menu_item["price"])
                 preorder.append(PreOrderItem(
-                    item_id=item["item_id"],
-                    name=item["name"],
-                    price=item["price"],
-                    quantity=item["quantity"]
+                    item_id=str(menu_item["_id"]),
+                    name=menu_item["name"],
+                    price=price,
+                    quantity=quantity
                 ))
-                preorder_total += item["price"] * item["quantity"]
+                preorder_total += price * quantity
         
         # Create reservation
         reservation = Reservation(

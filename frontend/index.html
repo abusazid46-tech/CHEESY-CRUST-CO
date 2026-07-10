@@ -807,17 +807,22 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <div id="phoneStep">
-          <label class="form-label">Phone Number</label>
-          <input type="tel" class="form-control mb-3" id="phoneNumber" placeholder="+91 98765 43210">
-          <button class="btn btn-gold w-100" id="sendOtpBtn">Send OTP</button>
-        </div>
-        <div id="otpStep" style="display: none;">
-          <label class="form-label">Enter OTP</label>
-          <input type="text" class="form-control mb-3" id="otpInput" placeholder="123456" maxlength="6">
-          <button class="btn btn-gold w-100" id="verifyOtpBtn">Verify & Sign In</button>
-          <button class="btn btn-outline-gold w-100 mt-2" id="backToPhoneBtn">Back</button>
-        </div>
+        <form id="customerAuthForm">
+          <div id="nameField" style="display: none;">
+            <label class="form-label">Full Name</label>
+            <input type="text" class="form-control mb-3" id="authName" placeholder="John Doe">
+          </div>
+          <label class="form-label">Email or Mobile Number</label>
+          <input type="text" class="form-control mb-3" id="authIdentifier" placeholder="email@example.com or +91 98765 43210">
+          <div id="phoneField" style="display: none;">
+            <label class="form-label">Mobile Number</label>
+            <input type="tel" class="form-control mb-3" id="authPhone" placeholder="+91 98765 43210">
+          </div>
+          <label class="form-label">Password</label>
+          <input type="password" class="form-control mb-3" id="authPassword" placeholder="Enter password">
+          <button class="btn btn-gold w-100" id="authSubmitBtn" type="submit">Sign In</button>
+          <button class="btn btn-outline-gold w-100 mt-2" id="authModeToggleBtn" type="button">Create an account</button>
+        </form>
         <div id="authSuccess" style="display: none;" class="text-center">
           <i class="fas fa-check-circle" style="color: #28a745; font-size: 48px;"></i>
           <p class="mt-3">Successfully signed in!</p>

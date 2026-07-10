@@ -8,7 +8,7 @@ from typing import Optional
 
 class CreateOrderRequest(BaseModel):
     """Create Razorpay order request"""
-    amount: float = Field(..., gt=0)
+    amount: Optional[float] = Field(None, gt=0)
     order_id: Optional[str] = None
     reservation_id: Optional[str] = None
     notes: Optional[dict] = None

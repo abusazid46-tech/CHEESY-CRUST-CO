@@ -8,7 +8,7 @@ from .payment import *
 
 __all__ = [
     # Auth schemas
-    "SendOTPRequest", "SendOTPResponse", "VerifyOTPRequest",
+    "RegisterRequest", "LoginRequest",
     "TokenResponse", "RefreshTokenRequest",
     # User schemas
     "UserProfileResponse", "UserUpdateRequest",

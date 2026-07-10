@@ -5,8 +5,13 @@ Payment routes - Razorpay integration
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
+import hmac
+import hashlib
+import json
 
 from middleware import auth_optional, auth_required, get_current_user
+from config.settings import settings
+from database import collections
 from schemas.payment import (
     CreateOrderRequest, CreateOrderResponse,
     VerifyPaymentRequest
@@ -77,14 +82,27 @@ async def verify_payment(
 @router.post("/webhook")
 async def razorpay_webhook(request: Request):
     """Handle Razorpay webhooks"""
-    # Get webhook secret from headers
-    webhook_secret = request.headers.get("X-Razorpay-Signature")
-    
-    # Get request body
+    signature = request.headers.get("X-Razorpay-Signature")
     body = await request.body()
-    
-    # Verify webhook signature (implement verification)
-    # Process webhook event
+
+    if settings.RAZORPAY_WEBHOOK_SECRET:
+        expected = hmac.new(
+            settings.RAZORPAY_WEBHOOK_SECRET.encode(),
+            body,
+            hashlib.sha256
+        ).hexdigest()
+        if not signature or not hmac.compare_digest(expected, signature):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature")
+
+    event = json.loads(body.decode("utf-8"))
+    await collections.payments.update_one(
+        {"razorpay_order_id": event.get("payload", {}).get("payment", {}).get("entity", {}).get("order_id")},
+        {"$set": {
+            "last_webhook_event": event.get("event"),
+            "last_webhook_at": event.get("created_at"),
+            "webhook_payload": event,
+        }}
+    )
     
     return JSONResponse(
         content={"status": "received"},

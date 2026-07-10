@@ -24,8 +24,23 @@ class OrderService:
     ) -> Optional[Order]:
         """Create a new order"""
         try:
-            # Calculate totals
-            subtotal = sum(item["price"] * item["quantity"] for item in items)
+            order_items = []
+            subtotal = 0.0
+            for item in items:
+                menu_item = await collections.menu_items.find_one({"_id": ObjectId(item["item_id"])})
+                if not menu_item or not menu_item.get("is_available", False):
+                    return None
+                quantity = int(item["quantity"])
+                price = float(menu_item["price"])
+                subtotal += price * quantity
+                order_items.append(OrderItem(
+                    item_id=str(menu_item["_id"]),
+                    name=menu_item["name"],
+                    price=price,
+                    quantity=quantity,
+                    image_url=menu_item.get("image_url")
+                ))
+
             delivery_fee = settings.DELIVERY_FEE if order_type == "delivery" else 0
             
             # Free delivery threshold
@@ -33,17 +48,6 @@ class OrderService:
                 delivery_fee = 0
             
             total = subtotal + delivery_fee
-            
-            # Create order items
-            order_items = []
-            for item in items:
-                order_items.append(OrderItem(
-                    item_id=item["item_id"],
-                    name=item["name"],
-                    price=item["price"],
-                    quantity=item["quantity"],
-                    image_url=item.get("image_url")
-                ))
             
             # Generate unique order number
             order_number = Order.generate_order_number()

@@ -2,13 +2,14 @@
 const API_BASE_URL = window.API_BASE_URL || (
     ['localhost', '127.0.0.1'].includes(window.location.hostname)
         ? 'http://localhost:8000/api/v1'
-        : 'https://cheesy-crust-api.onrender.com/api/v1'
+        : `${window.location.origin}/api/v1`
 );
 
 const STORAGE_KEYS = {
     token: 'auth_token',
     refreshToken: 'refresh_token',
     userPhone: 'user_phone',
+    userEmail: 'user_email',
     userName: 'user_name',
     isAdmin: 'is_admin'
 };
@@ -42,6 +43,7 @@ class ApiService {
         if (session.access_token) this.setToken(session.access_token);
         if (session.refresh_token) localStorage.setItem(STORAGE_KEYS.refreshToken, session.refresh_token);
         if (session.phone) localStorage.setItem(STORAGE_KEYS.userPhone, session.phone);
+        if (session.email) localStorage.setItem(STORAGE_KEYS.userEmail, session.email);
         if (session.name) localStorage.setItem(STORAGE_KEYS.userName, session.name);
         localStorage.setItem(STORAGE_KEYS.isAdmin, String(Boolean(session.is_admin)));
     }
@@ -89,17 +91,19 @@ class ApiService {
         return data;
     }
 
-    async sendOTP(phone) {
-        return this.request('/auth/send-otp', {
+    async register({ name, email, phone, password }) {
+        const response = await this.request('/auth/register', {
             method: 'POST',
-            body: JSON.stringify({ phone })
+            body: JSON.stringify({ name, email, phone, password })
         });
+        this.setSession(response);
+        return response;
     }
 
-    async verifyOTP(phone, otp) {
-        const response = await this.request('/auth/verify-otp', {
+    async login(identifier, password) {
+        const response = await this.request('/auth/login', {
             method: 'POST',
-            body: JSON.stringify({ phone, otp })
+            body: JSON.stringify({ identifier, password })
         });
         this.setSession(response);
         return response;

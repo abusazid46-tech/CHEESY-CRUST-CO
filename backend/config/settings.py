@@ -53,18 +53,6 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     
-    # OTP Settings
-    OTP_LENGTH: int = 6
-    OTP_EXPIRE_MINUTES: int = 5
-    OTP_RESEND_COOLDOWN_SECONDS: int = 60
-    OTP_DEMO_MODE: bool = False
-    
-    # Twilio SMS OTP
-    TWILIO_ACCOUNT_SID: Optional[str] = None
-    TWILIO_AUTH_TOKEN: Optional[str] = None
-    TWILIO_VERIFY_SERVICE_SID: Optional[str] = None
-    TWILIO_PHONE_NUMBER: Optional[str] = None
-    
     # Razorpay Payment
     RAZORPAY_KEY_ID: str = Field(..., env="RAZORPAY_KEY_ID")
     RAZORPAY_KEY_SECRET: str = Field(..., env="RAZORPAY_KEY_SECRET")

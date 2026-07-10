@@ -5,8 +5,6 @@ Security utilities - JWT and authentication helpers
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
-import secrets
-import string
 
 from config.settings import settings
 
@@ -40,13 +38,6 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
         return payload
     except JWTError:
         return None
-
-
-def generate_otp(length: int = 6) -> str:
-    """Generate numeric OTP"""
-    if settings.OTP_DEMO_MODE:
-        return "123456"
-    return ''.join(secrets.choice(string.digits) for _ in range(length))
 
 
 def validate_phone(phone: str) -> str:

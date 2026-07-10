@@ -248,17 +248,13 @@ function showAuthModalForCheckout() {
                         <button type="button" class="btn-close" data-bs-dismiss="modal" style="filter: invert(1);"></button>
                     </div>
                     <div class="modal-body">
-                        <div id="checkoutPhoneStep">
-                            <label class="form-label" style="color: #cda45e;">Phone Number</label>
-                            <input type="tel" class="form-control mb-3" id="checkoutPhoneNumber" placeholder="+91 98765 43210" style="background: #0c0b09; border-color: #3a352e; color: white;">
-                            <button class="btn btn-gold w-100" id="checkoutSendOtpBtn">Send OTP</button>
-                        </div>
-                        <div id="checkoutOtpStep" style="display: none;">
-                            <label class="form-label" style="color: #cda45e;">Enter OTP</label>
-                            <input type="text" class="form-control mb-3" id="checkoutOtpInput" placeholder="123456" maxlength="6" style="background: #0c0b09; border-color: #3a352e; color: white;">
-                            <button class="btn btn-gold w-100" id="checkoutVerifyOtpBtn">Verify & Continue</button>
-                            <button class="btn btn-outline-gold w-100 mt-2" id="checkoutBackToPhoneBtn">Back</button>
-                        </div>
+                        <form id="checkoutAuthForm">
+                            <label class="form-label" style="color: #cda45e;">Email or Mobile Number</label>
+                            <input type="text" class="form-control mb-3" id="checkoutIdentifier" placeholder="email@example.com or +91 98765 43210" style="background: #0c0b09; border-color: #3a352e; color: white;">
+                            <label class="form-label" style="color: #cda45e;">Password</label>
+                            <input type="password" class="form-control mb-3" id="checkoutPassword" placeholder="Enter password" style="background: #0c0b09; border-color: #3a352e; color: white;">
+                            <button class="btn btn-gold w-100" id="checkoutLoginBtn" type="submit">Sign In & Continue</button>
+                        </form>
                         <div id="checkoutAuthMessage" class="mt-3 text-center small" style="color: #cda45e;"></div>
                     </div>
                 </div>
@@ -271,46 +267,26 @@ function showAuthModalForCheckout() {
 }
 
 function setupCheckoutAuthHandlers() {
-    document.getElementById('checkoutSendOtpBtn')?.addEventListener('click', async event => {
-        const phone = document.getElementById('checkoutPhoneNumber').value.trim();
+    document.getElementById('checkoutAuthForm')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const identifier = document.getElementById('checkoutIdentifier').value.trim();
+        const password = document.getElementById('checkoutPassword').value;
         const message = document.getElementById('checkoutAuthMessage');
-        if (phone.length < 10) {
-            message.innerText = 'Please enter a valid phone number';
+        if (!identifier || !password) {
+            message.innerText = 'Please enter your email/mobile and password.';
             return;
         }
-        setLoading(event.currentTarget, true, 'Sending...');
+        setLoading(document.getElementById('checkoutLoginBtn'), true, 'Signing in...');
         try {
-            await api.sendOTP(phone);
-            message.innerText = 'OTP sent. Enter the code sent to your phone.';
-            document.getElementById('checkoutPhoneStep').style.display = 'none';
-            document.getElementById('checkoutOtpStep').style.display = 'block';
-        } catch (error) {
-            message.innerText = error.message;
-        } finally {
-            setLoading(event.currentTarget, false);
-        }
-    });
-
-    document.getElementById('checkoutVerifyOtpBtn')?.addEventListener('click', async event => {
-        const phone = document.getElementById('checkoutPhoneNumber').value.trim();
-        const otp = document.getElementById('checkoutOtpInput').value.trim();
-        const message = document.getElementById('checkoutAuthMessage');
-        setLoading(event.currentTarget, true, 'Verifying...');
-        try {
-            await api.verifyOTP(phone, otp);
+            await api.login(identifier, password);
             bootstrap.Modal.getInstance(document.getElementById('checkoutAuthModal')).hide();
             showToast('Signed in successfully.');
             await processCheckout(document.getElementById('orderType').value, document.getElementById('deliveryAddress')?.value.trim());
         } catch (error) {
             message.innerText = error.message;
         } finally {
-            setLoading(event.currentTarget, false);
+            setLoading(document.getElementById('checkoutLoginBtn'), false);
         }
-    });
-
-    document.getElementById('checkoutBackToPhoneBtn')?.addEventListener('click', () => {
-        document.getElementById('checkoutPhoneStep').style.display = 'block';
-        document.getElementById('checkoutOtpStep').style.display = 'none';
     });
 }
 
