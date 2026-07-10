@@ -31,7 +31,7 @@ ADMIN_PASSWORD=
 RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
 RAZORPAY_WEBHOOK_SECRET=
-CORS_ORIGINS=https://whitesmoke-jay-438498.hostingersite.com
+CORS_ORIGINS=https://whitesmoke-jay-438498.hostingersite.com,https://cheesy-crust-co-7w5c.vercel.app
 ```
 
 Create the database and user in Hostinger hPanel first, then copy the exact database name, username, password, and host into the Node app `.env`. Use `127.0.0.1` on Hostinger Node.js so Node connects over IPv4 instead of resolving `localhost` to IPv6. The app creates its own tables on first start.

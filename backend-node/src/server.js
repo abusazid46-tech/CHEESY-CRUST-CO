@@ -26,7 +26,7 @@ const settings = {
   adminPassword: process.env.ADMIN_PASSWORD || "Admin@123456"
 };
 
-const corsOrigins = (process.env.CORS_ORIGINS || "https://whitesmoke-jay-438498.hostingersite.com,http://localhost:5500,http://127.0.0.1:5500")
+const corsOrigins = (process.env.CORS_ORIGINS || "https://whitesmoke-jay-438498.hostingersite.com,https://cheesy-crust-co-7w5c.vercel.app,http://localhost:5500,http://127.0.0.1:5500")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
 
 let db;
