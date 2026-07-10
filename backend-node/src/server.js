@@ -204,19 +204,31 @@ async function adminRequired(req, res, next) {
 }
 
 async function ensureIndexes() {
-  await collections.users.createIndex({ phone: 1 }, { unique: true });
-  await collections.users.createIndex({ email: 1 }, { unique: true, sparse: true });
-  await collections.admins.createIndex({ email: 1 }, { unique: true });
-  await collections.menu_items.createIndex({ slug: 1 }, { unique: true });
-  await collections.menu_items.createIndex({ category: 1 });
-  await collections.menu_items.createIndex({ is_available: 1 });
-  await collections.carts.createIndex({ user_id: 1 }, { unique: true });
-  await collections.orders.createIndex({ order_number: 1 }, { unique: true });
-  await collections.orders.createIndex({ user_id: 1 });
-  await collections.orders.createIndex({ status: 1 });
-  await collections.reservations.createIndex({ phone: 1 });
-  await collections.reservations.createIndex({ date: -1 });
-  await collections.payments.createIndex({ razorpay_order_id: 1 }, { unique: true });
+  await safeCreateIndex(collections.users, { phone: 1 }, { unique: true });
+  await safeCreateIndex(collections.users, { email: 1 }, { sparse: true });
+  await safeCreateIndex(collections.admins, { email: 1 }, { unique: true });
+  await safeCreateIndex(collections.menu_items, { slug: 1 }, { unique: true });
+  await safeCreateIndex(collections.menu_items, { category: 1 });
+  await safeCreateIndex(collections.menu_items, { is_available: 1 });
+  await safeCreateIndex(collections.carts, { user_id: 1 }, { unique: true });
+  await safeCreateIndex(collections.orders, { order_number: 1 }, { unique: true });
+  await safeCreateIndex(collections.orders, { user_id: 1 });
+  await safeCreateIndex(collections.orders, { status: 1 });
+  await safeCreateIndex(collections.reservations, { phone: 1 });
+  await safeCreateIndex(collections.reservations, { date: -1 });
+  await safeCreateIndex(collections.payments, { razorpay_order_id: 1 }, { unique: true });
+}
+
+async function safeCreateIndex(collection, keys, options = {}) {
+  try {
+    await collection.createIndex(keys, options);
+  } catch (error) {
+    if (error.code === 85 || error.code === 86) {
+      console.warn(`Keeping existing MongoDB index for ${collection.collectionName}: ${JSON.stringify(keys)}`);
+      return;
+    }
+    throw error;
+  }
 }
 
 async function ensureDefaultAdmin() {
