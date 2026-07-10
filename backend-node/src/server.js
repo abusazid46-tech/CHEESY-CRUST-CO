@@ -38,10 +38,23 @@ const corsOrigins = (process.env.CORS_ORIGINS || "http://localhost:5500,http://l
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (corsOrigins.includes(origin)) return true;
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === "whitesmoke-jay-438498.hostingersite.com" ||
+      hostname === "localhost" ||
+      hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
 app.use(helmet());
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+    if (isAllowedOrigin(origin)) return callback(null, true);
     return callback(new Error("Origin not allowed by CORS"));
   },
   credentials: true
@@ -290,7 +303,18 @@ function menuResponse(item) {
   });
 }
 
-app.get("/", (_req, res) => {
+const staticDir = [
+  process.env.STATIC_DIR,
+  path.join(__dirname, "..", "frontend"),
+  path.join(__dirname, "..", "..", "frontend"),
+  path.join(__dirname, "..", "..", "public_html", "frontend")
+].filter(Boolean).find((candidate) => fs.existsSync(path.join(candidate, "index.html")));
+
+if (staticDir) {
+  app.use(express.static(staticDir));
+}
+
+app.get("/api", (_req, res) => {
   res.json({ name: "Cheesy Crust Co. API", version: "1.0.0-node", status: "online", environment: process.env.NODE_ENV || "development" });
 });
 
@@ -927,15 +951,7 @@ app.delete(`${API_PREFIX}/admin/reviews/:reviewId`, adminRequired, asyncRoute(as
   res.json({ success: true, message: "Review deleted" });
 }));
 
-const staticDir = [
-  process.env.STATIC_DIR,
-  path.join(__dirname, "..", "frontend"),
-  path.join(__dirname, "..", "..", "frontend"),
-  path.join(__dirname, "..", "..", "public_html", "frontend")
-].filter(Boolean).find((candidate) => fs.existsSync(path.join(candidate, "index.html")));
-
 if (staticDir) {
-  app.use(express.static(staticDir));
   app.get("*", (req, res, next) => {
     if (req.path.startsWith(API_PREFIX)) return next();
     return res.sendFile(path.join(staticDir, "index.html"));
