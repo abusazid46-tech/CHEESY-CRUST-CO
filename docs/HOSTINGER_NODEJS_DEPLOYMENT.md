@@ -18,7 +18,7 @@ Copy `backend-node/.env.example` to Hostinger environment variables, or create a
 Required values:
 
 ```bash
-MYSQL_HOST=localhost
+MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3306
 MYSQL_DATABASE=
 MYSQL_USER=
@@ -34,7 +34,7 @@ RAZORPAY_WEBHOOK_SECRET=
 CORS_ORIGINS=https://whitesmoke-jay-438498.hostingersite.com
 ```
 
-Create the database and user in Hostinger hPanel first, then copy the exact database name, username, password, and host into the Node app `.env`. The app creates its own tables on first start.
+Create the database and user in Hostinger hPanel first, then copy the exact database name, username, password, and host into the Node app `.env`. Use `127.0.0.1` on Hostinger Node.js so Node connects over IPv4 instead of resolving `localhost` to IPv6. The app creates its own tables on first start.
 
 ## Install And Start Over SSH
 
