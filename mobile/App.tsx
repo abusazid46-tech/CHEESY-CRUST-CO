@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
-import type { ReactNode } from 'react';
+import { createElement, type ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -741,7 +741,6 @@ function PaymentModal({
   onFailure: (message: string) => void;
 }) {
   const [verifying, setVerifying] = useState(false);
-  if (!payment) return null;
 
   const html = `
 <!DOCTYPE html>
@@ -750,14 +749,21 @@ function PaymentModal({
 <body style="background:#120f0a;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;">
   <div><h3>Opening Razorpay...</h3><p>Please complete the payment securely.</p></div>
   <script>
-    function send(type, payload) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: type, payload: payload || {} })); }
+    function send(type, payload) {
+      var message = JSON.stringify({ type: type, payload: payload || {} });
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(message);
+      } else if (window.parent) {
+        window.parent.postMessage(message, "*");
+      }
+    }
     var options = {
-      key: "${payment.razorpayKey}",
-      amount: ${payment.amount},
+      key: "${payment?.razorpayKey || ''}",
+      amount: ${payment?.amount || 0},
       currency: "INR",
       name: "Cheesy Crust Co.",
-      description: "Order #${payment.orderNumber}",
-      order_id: "${payment.razorpayOrderId}",
+      description: "Order #${payment?.orderNumber || ''}",
+      order_id: "${payment?.razorpayOrderId || ''}",
       theme: { color: "#cda45e" },
       handler: function(response) { send("success", response); },
       modal: { ondismiss: function() { send("dismiss", {}); } }
@@ -769,6 +775,35 @@ function PaymentModal({
 </body>
 </html>`;
 
+  useEffect(() => {
+    if (!payment || Platform.OS !== 'web') return undefined;
+
+    const listener = async (event: MessageEvent) => {
+      const message = typeof event.data === 'string' ? safeJson(event.data) : event.data;
+      if (!message?.type) return;
+
+      if (message.type === 'success') {
+        setVerifying(true);
+        try {
+          await onSuccess(message.payload);
+        } catch (error) {
+          onFailure(error instanceof Error ? error.message : 'Payment verification failed.');
+        } finally {
+          setVerifying(false);
+        }
+      }
+      if (message.type === 'failed') {
+        onFailure(message.payload?.error?.description || 'Payment failed. Try another method.');
+      }
+      if (message.type === 'dismiss') onClose();
+    };
+
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  }, [onClose, onFailure, onSuccess, payment]);
+
+  if (!payment) return null;
+
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={styles.paymentShell}>
@@ -778,6 +813,13 @@ function PaymentModal({
         </View>
         {verifying ? (
           <View style={styles.loadingShell}><ActivityIndicator color="#cda45e" size="large" /><Text style={styles.loadingText}>Verifying payment...</Text></View>
+        ) : Platform.OS === 'web' ? (
+          createElement('iframe', {
+            srcDoc: html,
+            title: 'Razorpay Checkout',
+            style: { border: 0, flex: 1, width: '100%', height: '100%' },
+            allow: 'payment *; clipboard-read *; clipboard-write *',
+          } as any)
         ) : (
           <WebView
             originWhitelist={['*']}
