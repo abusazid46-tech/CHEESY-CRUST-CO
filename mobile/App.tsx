@@ -69,6 +69,29 @@ type Notice = {
   message: string;
 };
 
+async function getStoredValue(key: string) {
+  if (Platform.OS === 'web') {
+    return window.localStorage.getItem(key);
+  }
+  return SecureStore.getItemAsync(key);
+}
+
+async function setStoredValue(key: string, value: string) {
+  if (Platform.OS === 'web') {
+    window.localStorage.setItem(key, value);
+    return;
+  }
+  await SecureStore.setItemAsync(key, value);
+}
+
+async function deleteStoredValue(key: string) {
+  if (Platform.OS === 'web') {
+    window.localStorage.removeItem(key);
+    return;
+  }
+  await SecureStore.deleteItemAsync(key);
+}
+
 function price(value: number) {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -191,8 +214,8 @@ export default function App() {
   const bootstrap = useCallback(async () => {
     setLoading(true);
     try {
-      const savedToken = await SecureStore.getItemAsync(TOKEN_KEY);
-      const savedRefresh = await SecureStore.getItemAsync(REFRESH_KEY);
+      const savedToken = await getStoredValue(TOKEN_KEY);
+      const savedRefresh = await getStoredValue(REFRESH_KEY);
       if (savedToken) {
         setToken(savedToken);
         setSession((current) => current || { access_token: savedToken, refresh_token: savedRefresh || undefined });
@@ -248,13 +271,13 @@ export default function App() {
   async function saveSession(nextSession: Session) {
     setSession(nextSession);
     setToken(nextSession.access_token);
-    await SecureStore.setItemAsync(TOKEN_KEY, nextSession.access_token);
-    if (nextSession.refresh_token) await SecureStore.setItemAsync(REFRESH_KEY, nextSession.refresh_token);
+    await setStoredValue(TOKEN_KEY, nextSession.access_token);
+    if (nextSession.refresh_token) await setStoredValue(REFRESH_KEY, nextSession.refresh_token);
   }
 
   async function logout() {
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
-    await SecureStore.deleteItemAsync(REFRESH_KEY);
+    await deleteStoredValue(TOKEN_KEY);
+    await deleteStoredValue(REFRESH_KEY);
     setToken(null);
     setSession(null);
     setOrders([]);
