@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import { NavigationBar } from 'expo-navigation-bar';
 import * as SecureStore from 'expo-secure-store';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { createElement, type ComponentProps, type ReactNode } from 'react';
@@ -13,13 +14,13 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 
 const API_BASE = 'https://whitesmoke-jay-438498.hostingersite.com/api/v1';
@@ -186,6 +187,14 @@ function LogoMark({ size = 46 }: { size?: number }) {
 }
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppShell />
+    </SafeAreaProvider>
+  );
+}
+
+function AppShell() {
   const [screen, setScreen] = useState<Screen>('menu');
   const [token, setToken] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -260,6 +269,9 @@ export default function App() {
 
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart]);
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
+  const insets = useSafeAreaInsets();
+  const topInset = Platform.OS === 'web' ? 0 : insets.top;
+  const bottomInset = Platform.OS === 'web' ? 0 : insets.bottom;
 
   function addToCart(item: MenuItem) {
     setCart((current) => {
@@ -389,9 +401,10 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.shell}>
+    <View style={styles.shell}>
       <StatusBar style="light" />
-      <View style={styles.header}>
+      <NavigationBar style="dark" hidden={false} />
+      <View style={[styles.header, { paddingTop: 14 + topInset }]}>
         <View style={styles.headerLeft}>
           <LogoMark />
           <View style={styles.headerCopy}>
@@ -421,7 +434,7 @@ export default function App() {
         {screen === 'profile' ? <ProfileScreen session={session} token={token} onLogin={() => setAuthVisible(true)} /> : null}
       </View>
 
-      <View style={styles.nav}>
+      <View style={[styles.nav, { paddingBottom: 10 + Math.max(bottomInset, 8) }]}>
         {([
           ['menu', 'Menu', 'silverware-fork-knife'],
           ['cart', 'Cart', 'shopping-outline'],
@@ -443,7 +456,7 @@ export default function App() {
 
       <AuthModal visible={authVisible} onClose={() => setAuthVisible(false)} onSession={saveSession} />
       <PaymentModal payment={payment} onClose={() => setPayment(null)} onSuccess={verifyPayment} onFailure={(message) => showNotice('error', message)} />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -538,6 +551,7 @@ function CartScreen({
   const [address, setAddress] = useState('');
   const [pincode, setPincode] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
   const deliveryFee = orderType === 'delivery' ? 40 : 0;
 
   async function submit() {
@@ -556,7 +570,11 @@ function CartScreen({
   }
 
   return (
-    <ScrollView style={styles.screen} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.formScrollContent, { paddingBottom: 118 + Math.max(insets.bottom, 12) }]}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.screenTitle}>Cart</Text>
       {cart.map((item) => (
         <View key={item.item_id} style={styles.cartRow}>
@@ -611,6 +629,7 @@ type ReservationForm = {
 };
 
 function BookingScreen({ onSubmit }: { onSubmit: (form: ReservationForm) => Promise<void> }) {
+  const insets = useSafeAreaInsets();
   const [form, setForm] = useState<ReservationForm>({
     name: '',
     phone: '',
@@ -642,7 +661,11 @@ function BookingScreen({ onSubmit }: { onSubmit: (form: ReservationForm) => Prom
   }
 
   return (
-    <ScrollView style={styles.screen} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.formScrollContent, { paddingBottom: 118 + Math.max(insets.bottom, 12) }]}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.screenTitle}>Book Table</Text>
       <Text style={styles.screenSubtitle}>Reserve a table without placing a delivery order.</Text>
       <View style={styles.panel}>
@@ -722,6 +745,7 @@ function AuthModal({ visible, onClose, onSession }: { visible: boolean; onClose:
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
 
   async function submit() {
     if (!identifier.trim() || !password) {
@@ -748,23 +772,25 @@ function AuthModal({ visible, onClose, onSession }: { visible: boolean; onClose:
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.modalTitle}>{mode === 'login' ? 'Welcome Back' : 'Create Account'}</Text>
-            <Pressable onPress={onClose}><Text style={styles.closeText}>Close</Text></Pressable>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalBackdrop}>
+        <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
+          <View style={[styles.modalCard, { paddingBottom: 18 + Math.max(insets.bottom, 12) }]}>
+            <View style={styles.rowBetween}>
+              <Text style={styles.modalTitle}>{mode === 'login' ? 'Welcome Back' : 'Create Account'}</Text>
+              <Pressable onPress={onClose}><Text style={styles.closeText}>Close</Text></Pressable>
+            </View>
+            {mode === 'register' ? <TextInput style={styles.input} placeholder="Full name" placeholderTextColor="#817767" value={name} onChangeText={setName} /> : null}
+            <TextInput style={styles.input} placeholder="Email or mobile" placeholderTextColor="#817767" autoCapitalize="none" value={identifier} onChangeText={setIdentifier} />
+            {mode === 'register' ? <TextInput style={styles.input} placeholder="Mobile number" placeholderTextColor="#817767" keyboardType="phone-pad" value={phone} onChangeText={setPhone} /> : null}
+            <TextInput style={styles.input} placeholder="Password" placeholderTextColor="#817767" secureTextEntry value={password} onChangeText={setPassword} />
+            <Pressable style={[styles.primaryButton, submitting && styles.disabledButton]} disabled={submitting} onPress={submit}>
+              {submitting ? <ActivityIndicator color="#120f0a" /> : <Text style={styles.primaryButtonText}>{mode === 'login' ? 'Login' : 'Register'}</Text>}
+            </Pressable>
+            <Pressable onPress={() => setMode(mode === 'login' ? 'register' : 'login')}>
+              <Text style={styles.switchText}>{mode === 'login' ? 'New here? Create an account' : 'Already have an account? Login'}</Text>
+            </Pressable>
           </View>
-          {mode === 'register' ? <TextInput style={styles.input} placeholder="Full name" placeholderTextColor="#817767" value={name} onChangeText={setName} /> : null}
-          <TextInput style={styles.input} placeholder="Email or mobile" placeholderTextColor="#817767" autoCapitalize="none" value={identifier} onChangeText={setIdentifier} />
-          {mode === 'register' ? <TextInput style={styles.input} placeholder="Mobile number" placeholderTextColor="#817767" keyboardType="phone-pad" value={phone} onChangeText={setPhone} /> : null}
-          <TextInput style={styles.input} placeholder="Password" placeholderTextColor="#817767" secureTextEntry value={password} onChangeText={setPassword} />
-          <Pressable style={[styles.primaryButton, submitting && styles.disabledButton]} disabled={submitting} onPress={submit}>
-            {submitting ? <ActivityIndicator color="#120f0a" /> : <Text style={styles.primaryButtonText}>{mode === 'login' ? 'Login' : 'Register'}</Text>}
-          </Pressable>
-          <Pressable onPress={() => setMode(mode === 'login' ? 'register' : 'login')}>
-            <Text style={styles.switchText}>{mode === 'login' ? 'New here? Create an account' : 'Already have an account? Login'}</Text>
-          </Pressable>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -904,6 +930,7 @@ const styles = StyleSheet.create({
   authPillText: { color: '#120f0a', fontWeight: '900' },
   content: { flex: 1 },
   screen: { flex: 1, paddingHorizontal: 16, paddingTop: 14 },
+  formScrollContent: { flexGrow: 1 },
   heroPanel: { backgroundColor: '#1a150e', borderWidth: 1, borderColor: '#312717', borderRadius: 8, padding: 16, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOpacity: 0.26, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
   heroIcon: { width: 54, height: 54, borderRadius: 8, backgroundColor: '#cda45e', alignItems: 'center', justifyContent: 'center' },
   kicker: { color: '#cda45e', fontSize: 12, fontWeight: '900', textTransform: 'uppercase', marginBottom: 4 },
@@ -973,6 +1000,8 @@ const styles = StyleSheet.create({
   profileName: { color: '#f6e6c6', fontSize: 22, fontWeight: '900' },
   profileLine: { color: '#9d927d', marginTop: 8 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', justifyContent: 'flex-end' },
+  modalScroll: { flex: 1 },
+  modalScrollContent: { flexGrow: 1, justifyContent: 'flex-end' },
   modalCard: { backgroundColor: '#1a1814', padding: 18, borderTopLeftRadius: 18, borderTopRightRadius: 18, borderWidth: 1, borderColor: '#2c2418' },
   modalTitle: { color: '#f6e6c6', fontSize: 22, fontWeight: '900', marginBottom: 16 },
   closeText: { color: '#cda45e', fontWeight: '800' },
