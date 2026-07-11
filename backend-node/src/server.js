@@ -44,6 +44,8 @@ const defaultMenuItems = [
   { name: "Tiramisu", category: "dinner", price: 290, description: "Classic Italian dessert", image_url: "https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=400" }
 ];
 
+const deliveryPincodes = new Set(["788001", "788002", "788003", "788004", "788005"]);
+
 const corsOrigins = (process.env.CORS_ORIGINS || "https://whitesmoke-jay-438498.hostingersite.com,https://cheesy-crust-co-7w5c.vercel.app,http://localhost:5500,http://127.0.0.1:5500")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
 
@@ -66,6 +68,31 @@ function normalizePhone(phone) {
   if (digits.length === 10) return `+91${digits}`;
   if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
   return `+${digits}`;
+}
+
+function normalizePincode(value) {
+  const match = String(value || "").match(/\b\d{6}\b/);
+  return match ? match[0] : "";
+}
+
+function deliveryPincodeFromOrder(body) {
+  return normalizePincode(body.pincode || body.pin_code || body.postal_code || body.address);
+}
+
+function assertDeliveryAllowed(body) {
+  if (body.order_type !== "delivery") return null;
+  if (!String(body.address || "").trim()) {
+    const error = new Error("Delivery address is required");
+    error.status = 400;
+    throw error;
+  }
+  const pincode = deliveryPincodeFromOrder(body);
+  if (!deliveryPincodes.has(pincode)) {
+    const error = new Error("Delivery is available only for PIN codes 788001, 788002, 788003, 788004 and 788005. Please choose takeaway or book a table.");
+    error.status = 400;
+    throw error;
+  }
+  return pincode;
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
@@ -599,13 +626,15 @@ app.delete(`${API_PREFIX}/cart/clear`, authRequired, asyncRoute(async (req, res)
 }));
 
 app.post(`${API_PREFIX}/orders/create`, authRequired, asyncRoute(async (req, res) => {
+  const deliveryPincode = assertDeliveryAllowed(req.body);
   const items = await pricedItems(req.body.items);
   if (!items.length) return res.status(400).json({ detail: "Order requires at least one item" });
   const subtotal = total(items);
   const deliveryFee = req.body.order_type === "delivery" && subtotal < settings.freeDeliveryThreshold ? settings.deliveryFee : 0;
   const grand = subtotal + deliveryFee;
   const number = orderNumber();
-  const [result] = await db.execute("INSERT INTO orders (order_number,user_id,items,subtotal,delivery_fee,total,order_type,address,notes,status,payment_status) VALUES (?,?,?,?,?,?,?,?,?, 'pending','pending')", [number, req.user.id, JSON.stringify(items), subtotal, deliveryFee, grand, req.body.order_type, req.body.address || null, req.body.notes || null]);
+  const deliveryAddress = req.body.order_type === "delivery" ? `${String(req.body.address).trim()}\nPIN: ${deliveryPincode}` : null;
+  const [result] = await db.execute("INSERT INTO orders (order_number,user_id,items,subtotal,delivery_fee,total,order_type,address,notes,status,payment_status) VALUES (?,?,?,?,?,?,?,?,?, 'pending','pending')", [number, req.user.id, JSON.stringify(items), subtotal, deliveryFee, grand, req.body.order_type, deliveryAddress, req.body.notes || null]);
   res.json({ success: true, message: "Order created successfully", order_id: idString(result.insertId), order_number: number, total: grand });
 }));
 app.get(`${API_PREFIX}/orders/user`, authRequired, asyncRoute(async (req, res) => {

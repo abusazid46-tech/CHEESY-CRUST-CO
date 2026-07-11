@@ -1,5 +1,6 @@
 let cartItems = [];
 let cartSubtotal = 0;
+const DELIVERY_PINCODES = ['788001', '788002', '788003', '788004', '788005'];
 
 document.addEventListener('DOMContentLoaded', () => {
     loadCart();
@@ -84,6 +85,7 @@ function renderCart() {
 
     const deliveryFee = getDeliveryFee();
     document.getElementById('cart-subtotal').innerText = formatPrice(cartSubtotal);
+    document.getElementById('delivery-fee').innerText = formatPrice(deliveryFee);
     document.getElementById('cart-total').innerText = formatPrice(cartSubtotal + deliveryFee);
 }
 
@@ -132,6 +134,7 @@ async function checkout() {
     const button = document.getElementById('checkoutBtn');
     const orderType = document.getElementById('orderType').value;
     const address = document.getElementById('deliveryAddress')?.value.trim();
+    const pincode = normalizePincode(document.getElementById('deliveryPincode')?.value);
 
     if (!cartItems.length) {
         showToast('Your cart is empty', 'error');
@@ -141,6 +144,10 @@ async function checkout() {
         showToast('Please enter delivery address', 'error');
         return;
     }
+    if (orderType === 'delivery' && !isDeliveryPincodeAllowed(pincode)) {
+        showToast('Delivery is available only for PIN codes 788001, 788002, 788003, 788004 and 788005. Please choose takeaway or book a table.', 'error');
+        return;
+    }
     if (!isAuthenticated()) {
         showAuthModalForCheckout();
         return;
@@ -148,7 +155,7 @@ async function checkout() {
 
     setLoading(button, true, 'Creating order...');
     try {
-        await processCheckout(orderType, address);
+        await processCheckout(orderType, address, pincode);
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
@@ -156,7 +163,7 @@ async function checkout() {
     }
 }
 
-async function processCheckout(orderType, address) {
+async function processCheckout(orderType, address, pincode = '') {
     const orderData = {
         items: cartItems.map(item => ({
             item_id: item.item_id || item.id,
@@ -167,7 +174,8 @@ async function processCheckout(orderType, address) {
         })),
         total: cartSubtotal + getDeliveryFee(),
         order_type: orderType,
-        address: orderType === 'delivery' ? address : null
+        address: orderType === 'delivery' ? address : null,
+        pincode: orderType === 'delivery' ? pincode : null
     };
 
     const order = await api.createOrder(orderData);
@@ -291,7 +299,14 @@ function setupCheckoutAuthHandlers() {
                 showToast('These cart items are no longer available. Please add them again from the menu.', 'error');
                 return;
             }
-            await processCheckout(document.getElementById('orderType').value, document.getElementById('deliveryAddress')?.value.trim());
+            const checkoutOrderType = document.getElementById('orderType').value;
+            const checkoutAddress = document.getElementById('deliveryAddress')?.value.trim();
+            const checkoutPincode = normalizePincode(document.getElementById('deliveryPincode')?.value);
+            if (checkoutOrderType === 'delivery' && !isDeliveryPincodeAllowed(checkoutPincode)) {
+                showToast('Delivery is available only for PIN codes 788001, 788002, 788003, 788004 and 788005. Please choose takeaway or book a table.', 'error');
+                return;
+            }
+            await processCheckout(checkoutOrderType, checkoutAddress, checkoutPincode);
         } catch (error) {
             message.innerText = error.message;
         } finally {
@@ -302,6 +317,14 @@ function setupCheckoutAuthHandlers() {
 
 function getDeliveryFee() {
     return document.getElementById('orderType')?.value === 'delivery' ? 40 : 0;
+}
+
+function normalizePincode(value) {
+    return String(value || '').replace(/\D/g, '').slice(0, 6);
+}
+
+function isDeliveryPincodeAllowed(pincode) {
+    return DELIVERY_PINCODES.includes(normalizePincode(pincode));
 }
 
 function escapeJs(value) {
