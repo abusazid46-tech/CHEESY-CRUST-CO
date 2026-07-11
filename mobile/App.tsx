@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
-import { createElement, type ReactNode } from 'react';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { createElement, type ComponentProps, type ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -28,6 +29,7 @@ const REFRESH_KEY = 'cheesy_mobile_refresh';
 
 type Screen = 'menu' | 'cart' | 'booking' | 'orders' | 'profile';
 type OrderType = 'delivery' | 'takeaway';
+type NavIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 type MenuItem = {
   id: string;
@@ -172,6 +174,14 @@ function NoticeBar({ notice, onDismiss }: { notice: Notice | null; onDismiss: ()
     <Pressable onPress={onDismiss} style={[styles.notice, notice.type === 'error' ? styles.noticeError : notice.type === 'success' ? styles.noticeSuccess : styles.noticeInfo]}>
       <Text style={styles.noticeText}>{notice.message}</Text>
     </Pressable>
+  );
+}
+
+function LogoMark({ size = 46 }: { size?: number }) {
+  return (
+    <View style={[styles.logoMark, { width: size, height: size, borderRadius: size / 2 }]}>
+      <Text style={[styles.logoMarkText, { fontSize: Math.round(size * 0.44) }]}>C</Text>
+    </View>
   );
 }
 
@@ -382,11 +392,15 @@ export default function App() {
     <SafeAreaView style={styles.shell}>
       <StatusBar style="light" />
       <View style={styles.header}>
-        <View>
-          <Text style={styles.brand}>Cheesy Crust Co.</Text>
-          <Text style={styles.subBrand}>Silchar ordering and table booking</Text>
+        <View style={styles.headerLeft}>
+          <LogoMark />
+          <View style={styles.headerCopy}>
+            <Text style={styles.brand}>Cheesy Crust Co.</Text>
+            <Text style={styles.subBrand}>Silchar ordering and table booking</Text>
+          </View>
         </View>
         <Pressable style={styles.authPill} onPress={() => token ? logout() : setAuthVisible(true)}>
+          <MaterialCommunityIcons name={token ? 'logout' : 'account-circle-outline'} size={18} color="#120f0a" />
           <Text style={styles.authPillText}>{token ? 'Logout' : 'Login'}</Text>
         </Pressable>
       </View>
@@ -409,13 +423,19 @@ export default function App() {
 
       <View style={styles.nav}>
         {([
-          ['menu', 'Menu'],
-          ['cart', `Cart${cartCount ? ` ${cartCount}` : ''}`],
-          ['booking', 'Book'],
-          ['orders', 'Orders'],
-          ['profile', 'Profile'],
-        ] as [Screen, string][]).map(([key, label]) => (
+          ['menu', 'Menu', 'silverware-fork-knife'],
+          ['cart', 'Cart', 'shopping-outline'],
+          ['booking', 'Book', 'calendar-star'],
+          ['orders', 'Orders', 'receipt-text-outline'],
+          ['profile', 'Profile', 'account-outline'],
+        ] as [Screen, string, NavIconName][]).map(([key, label, icon]) => (
           <Pressable key={key} style={[styles.navButton, screen === key && styles.navButtonActive]} onPress={() => setScreen(key)}>
+            <View style={styles.navIconWrap}>
+              <MaterialCommunityIcons name={icon} size={22} color={screen === key ? '#120f0a' : '#9d927d'} />
+              {key === 'cart' && cartCount ? (
+                <View style={styles.navBadge}><Text style={styles.navBadgeText}>{cartCount}</Text></View>
+              ) : null}
+            </View>
             <Text style={[styles.navText, screen === key && styles.navTextActive]}>{label}</Text>
           </Pressable>
         ))}
@@ -446,15 +466,25 @@ function MenuScreen({
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.screenTitle}>Menu</Text>
-      <Text style={styles.screenSubtitle}>{cartCount ? `${cartCount} item${cartCount > 1 ? 's' : ''} in cart` : 'Choose your favorites'}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRail}>
-        {categories.map((cat) => (
-          <Pressable key={cat} style={[styles.categoryChip, category === cat && styles.categoryChipActive]} onPress={() => setCategory(cat)}>
-            <Text style={[styles.categoryText, category === cat && styles.categoryTextActive]}>{cat === 'all' ? 'All' : cat}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      <View style={styles.heroPanel}>
+        <View>
+          <Text style={styles.kicker}>Premium dining, delivered</Text>
+          <Text style={styles.screenTitle}>Menu</Text>
+          <Text style={styles.screenSubtitle}>{cartCount ? `${cartCount} item${cartCount > 1 ? 's' : ''} in cart` : 'Choose your favorites'}</Text>
+        </View>
+        <View style={styles.heroIcon}>
+          <MaterialCommunityIcons name="chef-hat" size={30} color="#120f0a" />
+        </View>
+      </View>
+      <View style={styles.categoryRailOuter}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRail} contentContainerStyle={styles.categoryRailContent}>
+          {categories.map((cat) => (
+            <Pressable key={cat} style={[styles.categoryChip, category === cat && styles.categoryChipActive]} onPress={() => setCategory(cat)}>
+              <Text style={[styles.categoryText, category === cat && styles.categoryTextActive]}>{cat === 'all' ? 'All' : cat}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
@@ -462,13 +492,24 @@ function MenuScreen({
         ListEmptyComponent={<EmptyState title="No menu items" detail="Pull to refresh or try again in a moment." />}
         renderItem={({ item }) => (
           <View style={styles.menuCard}>
-            <Image source={{ uri: item.image_url || item.img }} style={styles.menuImage} />
+            <View style={styles.menuImageWrap}>
+              <Image source={{ uri: item.image_url || item.img }} style={styles.menuImage} />
+              <View style={styles.menuImageShade} />
+              <View style={styles.categoryBadge}>
+                <MaterialCommunityIcons name="star-four-points" size={12} color="#120f0a" />
+                <Text style={styles.categoryBadgeText}>{item.category}</Text>
+              </View>
+            </View>
             <View style={styles.menuBody}>
               <Text style={styles.menuName}>{item.name}</Text>
               <Text style={styles.menuDescription} numberOfLines={2}>{item.description}</Text>
               <View style={styles.rowBetween}>
-                <Text style={styles.menuPrice}>{price(item.price)}</Text>
+                <View>
+                  <Text style={styles.menuPrice}>{price(item.price)}</Text>
+                  <Text style={styles.menuMeta}>Freshly prepared</Text>
+                </View>
                 <Pressable style={styles.primaryButtonSmall} onPress={() => onAdd(item)}>
+                  <MaterialCommunityIcons name="plus" size={18} color="#120f0a" />
                   <Text style={styles.primaryButtonText}>Add</Text>
                 </Pressable>
               </View>
@@ -849,32 +890,46 @@ function PaymentModal({
 }
 
 const styles = StyleSheet.create({
-  shell: { flex: 1, backgroundColor: '#120f0a' },
-  loadingShell: { flex: 1, backgroundColor: '#120f0a', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  shell: { flex: 1, backgroundColor: '#0d0b08' },
+  loadingShell: { flex: 1, backgroundColor: '#0d0b08', alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: '#cda45e', fontSize: 15 },
-  header: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#292217' },
-  brand: { color: '#f6e6c6', fontSize: 24, fontWeight: '800' },
-  subBrand: { color: '#9d927d', marginTop: 3 },
-  authPill: { borderWidth: 1, borderColor: '#cda45e', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999 },
-  authPillText: { color: '#cda45e', fontWeight: '700' },
+  header: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#2f271b', backgroundColor: '#17120c' },
+  headerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingRight: 12 },
+  headerCopy: { flex: 1, marginLeft: 12 },
+  logoMark: { backgroundColor: '#cda45e', borderWidth: 1, borderColor: '#f5e0ad', alignItems: 'center', justifyContent: 'center', shadowColor: '#cda45e', shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  logoMarkText: { color: '#120f0a', fontWeight: '900' },
+  brand: { color: '#fff0cc', fontSize: 23, fontWeight: '900', letterSpacing: 0 },
+  subBrand: { color: '#b8ab91', marginTop: 3, fontSize: 12 },
+  authPill: { backgroundColor: '#cda45e', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 6, shadowColor: '#cda45e', shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
+  authPillText: { color: '#120f0a', fontWeight: '900' },
   content: { flex: 1 },
-  screen: { flex: 1, padding: 16 },
-  screenTitle: { color: '#f6e6c6', fontSize: 26, fontWeight: '800' },
-  screenSubtitle: { color: '#9d927d', marginTop: 4, marginBottom: 12 },
-  categoryRail: { maxHeight: 50, marginVertical: 12 },
-  categoryChip: { height: 38, paddingHorizontal: 16, borderRadius: 999, borderWidth: 1, borderColor: '#2f271b', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  screen: { flex: 1, paddingHorizontal: 16, paddingTop: 14 },
+  heroPanel: { backgroundColor: '#1a150e', borderWidth: 1, borderColor: '#312717', borderRadius: 8, padding: 16, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOpacity: 0.26, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
+  heroIcon: { width: 54, height: 54, borderRadius: 8, backgroundColor: '#cda45e', alignItems: 'center', justifyContent: 'center' },
+  kicker: { color: '#cda45e', fontSize: 12, fontWeight: '900', textTransform: 'uppercase', marginBottom: 4 },
+  screenTitle: { color: '#fff0cc', fontSize: 28, fontWeight: '900' },
+  screenSubtitle: { color: '#b8ab91', marginTop: 4, marginBottom: 2 },
+  categoryRailOuter: { height: 56, flexGrow: 0, marginBottom: 14, overflow: 'hidden' },
+  categoryRail: { flex: 1 },
+  categoryRailContent: { alignItems: 'center', paddingRight: 4 },
+  categoryChip: { height: 40, paddingHorizontal: 17, borderRadius: 999, borderWidth: 1, borderColor: '#3a2f20', alignItems: 'center', justifyContent: 'center', marginRight: 9, backgroundColor: '#15110c' },
   categoryChipActive: { backgroundColor: '#cda45e', borderColor: '#cda45e' },
   categoryText: { color: '#cda45e', textTransform: 'capitalize', fontWeight: '700' },
   categoryTextActive: { color: '#120f0a' },
-  menuCard: { backgroundColor: '#1a1814', borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#2c2418', marginBottom: 14 },
-  menuImage: { height: 150, width: '100%', backgroundColor: '#292217' },
-  menuBody: { padding: 14 },
-  menuName: { color: '#f6e6c6', fontSize: 18, fontWeight: '800' },
-  menuDescription: { color: '#9d927d', marginTop: 5, minHeight: 38 },
+  menuCard: { backgroundColor: '#17130e', borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#332817', marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 16, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
+  menuImageWrap: { height: 178, width: '100%', backgroundColor: '#292217' },
+  menuImage: { height: '100%', width: '100%' },
+  menuImageShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.12)' },
+  categoryBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: '#cda45e', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  categoryBadgeText: { color: '#120f0a', fontWeight: '900', textTransform: 'capitalize', fontSize: 12 },
+  menuBody: { padding: 16 },
+  menuName: { color: '#fff0cc', fontSize: 20, fontWeight: '900' },
+  menuDescription: { color: '#a99b82', marginTop: 6, minHeight: 40, lineHeight: 20 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  menuPrice: { color: '#cda45e', fontSize: 18, fontWeight: '800' },
+  menuPrice: { color: '#d9b76c', fontSize: 22, fontWeight: '900' },
+  menuMeta: { color: '#756b5b', fontSize: 12, marginTop: 2 },
   primaryButton: { backgroundColor: '#cda45e', minHeight: 48, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, marginTop: 14 },
-  primaryButtonSmall: { backgroundColor: '#cda45e', minHeight: 36, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
+  primaryButtonSmall: { backgroundColor: '#cda45e', minHeight: 42, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 15, flexDirection: 'row', gap: 5, shadowColor: '#cda45e', shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
   primaryButtonText: { color: '#120f0a', fontWeight: '900' },
   disabledButton: { opacity: 0.6 },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
@@ -902,11 +957,14 @@ const styles = StyleSheet.create({
   totalValue: { color: '#f6e6c6', fontWeight: '700' },
   grandLabel: { color: '#f6e6c6', fontSize: 18, fontWeight: '900' },
   grandValue: { color: '#cda45e', fontSize: 18, fontWeight: '900' },
-  nav: { flexDirection: 'row', padding: 8, borderTopWidth: 1, borderTopColor: '#292217', backgroundColor: '#16130f' },
-  navButton: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
-  navButtonActive: { backgroundColor: '#2b2318' },
-  navText: { color: '#8f836f', fontWeight: '800', fontSize: 12 },
-  navTextActive: { color: '#cda45e' },
+  nav: { flexDirection: 'row', paddingHorizontal: 10, paddingTop: 8, paddingBottom: 10, borderTopWidth: 1, borderTopColor: '#302616', backgroundColor: '#17120c', shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: -6 }, elevation: 10 },
+  navButton: { flex: 1, minHeight: 58, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
+  navButtonActive: { backgroundColor: '#cda45e' },
+  navIconWrap: { minHeight: 24, alignItems: 'center', justifyContent: 'center' },
+  navBadge: { position: 'absolute', right: -11, top: -8, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: '#fff0cc', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  navBadgeText: { color: '#120f0a', fontSize: 10, fontWeight: '900' },
+  navText: { color: '#9d927d', fontWeight: '900', fontSize: 11, marginTop: 3 },
+  navTextActive: { color: '#120f0a' },
   orderCard: { backgroundColor: '#1a1814', borderRadius: 8, padding: 14, borderWidth: 1, borderColor: '#2c2418', marginBottom: 12 },
   orderNumber: { color: '#f6e6c6', fontWeight: '900' },
   statusBadge: { color: '#120f0a', backgroundColor: '#cda45e', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, overflow: 'hidden', fontWeight: '900' },
