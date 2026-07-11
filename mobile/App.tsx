@@ -3,7 +3,7 @@ import { NavigationBar } from 'expo-navigation-bar';
 import * as SecureStore from 'expo-secure-store';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { createElement, type ComponentProps, type ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -49,6 +49,13 @@ type CartItem = MenuItem & {
   item_id: string;
 };
 
+type PreorderItem = {
+  id: string;
+  name: string;
+  price: number;
+  quantity: number;
+};
+
 type Session = {
   access_token: string;
   refresh_token?: string;
@@ -60,7 +67,8 @@ type Session = {
 type ApiError = Error & { status?: number };
 
 type PaymentState = {
-  orderId: string;
+  orderId?: string;
+  reservationId?: string;
   orderNumber: string;
   amount: number;
   razorpayOrderId: string;
@@ -365,17 +373,35 @@ function AppShell() {
         razorpay_payment_id: data.razorpay_payment_id,
         razorpay_order_id: data.razorpay_order_id,
         razorpay_signature: data.razorpay_signature,
-        order_id: payment.orderId,
+        ...(payment.orderId ? { order_id: payment.orderId } : {}),
+        ...(payment.reservationId ? { reservation_id: payment.reservationId } : {}),
       }),
     });
+    const wasReservation = Boolean(payment.reservationId);
     setPayment(null);
+    if (wasReservation) {
+      showNotice('success', 'Payment successful. Reservation confirmed.');
+      setScreen('booking');
+      return;
+    }
     setCart([]);
     showNotice('success', 'Payment successful. Order confirmed.');
     setScreen('orders');
     await loadOrders();
   }
 
-  async function createReservation(form: ReservationForm) {
+  async function createReservation(form: ReservationForm, preorderItems: PreorderItem[]) {
+    if (!token) {
+      setAuthVisible(true);
+      showNotice('info', 'Sign in before confirming a reservation.');
+      return;
+    }
+    const normalizedItems = preorderItems.map((item) => ({
+      item_id: item.id,
+      name: item.name,
+      price: item.price,
+      quantity: item.quantity,
+    }));
     const response = await apiRequest<any>('/reservation', {
       method: 'POST',
       body: JSON.stringify({
@@ -385,10 +411,25 @@ function AppShell() {
         time: form.time,
         guests: Number(form.guests),
         special_requests: form.specialRequests || null,
-        preorder_items: [],
+        preorder_items: normalizedItems,
       }),
     }, token);
-    showNotice('success', response.message || 'Table booking received.');
+    const preorderTotal = preorderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    if (preorderTotal <= 0) {
+      showNotice('success', `Reservation confirmed for ${form.name} on ${form.date} at ${form.time}.`);
+      return;
+    }
+    const paymentOrder = await authedRequest<any>('/payment/create-order', {
+      method: 'POST',
+      body: JSON.stringify({ amount: response.preorder_total || preorderTotal, reservation_id: response.reservation_id }),
+    });
+    setPayment({
+      reservationId: response.reservation_id,
+      orderNumber: `Reservation ${form.date} ${form.time}`,
+      amount: paymentOrder.amount,
+      razorpayOrderId: paymentOrder.razorpay_order_id,
+      razorpayKey: paymentOrder.razorpay_key,
+    });
   }
 
   if (loading) {
@@ -427,7 +468,7 @@ function AppShell() {
         {screen === 'cart' ? (
           <CartScreen cart={cart} total={cartTotal} onQty={changeCartQty} onCheckout={checkout} busy={Boolean(payment)} />
         ) : null}
-        {screen === 'booking' ? <BookingScreen onSubmit={createReservation} /> : null}
+        {screen === 'booking' ? <BookingScreen menu={menu} onSubmit={createReservation} /> : null}
         {screen === 'orders' ? (
           <OrdersScreen orders={orders} token={token} onLogin={() => setAuthVisible(true)} onRefresh={loadOrders} />
         ) : null}
@@ -628,31 +669,89 @@ type ReservationForm = {
   specialRequests: string;
 };
 
-function BookingScreen({ onSubmit }: { onSubmit: (form: ReservationForm) => Promise<void> }) {
+function BookingScreen({ menu, onSubmit }: { menu: MenuItem[]; onSubmit: (form: ReservationForm, preorderItems: PreorderItem[]) => Promise<void> }) {
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  const [tab, setTab] = useState<'details' | 'preorder' | 'summary'>('details');
   const [form, setForm] = useState<ReservationForm>({
     name: '',
     phone: '',
     date: new Date().toISOString().slice(0, 10),
-    time: '19:00',
-    guests: '2',
+    time: '',
+    guests: '4',
     specialRequests: '',
   });
+  const [preorderItems, setPreorderItems] = useState<PreorderItem[]>([]);
+  const [menuVisible, setMenuVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const preorderCount = preorderItems.reduce((sum, item) => sum + item.quantity, 0);
+  const preorderTotal = preorderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
   function update<K extends keyof ReservationForm>(key: K, value: ReservationForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  async function submit() {
-    if (!form.name.trim() || normalizePhone(form.phone).length !== 10 || !form.date || !form.time) {
-      Alert.alert('Booking', 'Please enter name, 10-digit mobile number, date and time.');
-      return;
+  function validateReservation() {
+    if (!form.name.trim() || normalizePhone(form.phone).length < 9 || !form.date || !form.time) {
+      Alert.alert('Reservation', 'Please fill all required fields: name, phone, date and time.');
+      return false;
     }
+    if (form.date < new Date().toISOString().slice(0, 10)) {
+      Alert.alert('Reservation', 'Reservation date cannot be in the past.');
+      return false;
+    }
+    return true;
+  }
+
+  function switchReservationTab(nextTab: 'details' | 'preorder' | 'summary') {
+    setTab(nextTab);
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
+  }
+
+  function goToPreorder() {
+    if (!validateReservation()) return;
+    switchReservationTab('preorder');
+  }
+
+  function goToSummary() {
+    if (!validateReservation()) return;
+    switchReservationTab('summary');
+  }
+
+  function addPreorderItem(item: MenuItem) {
+    setPreorderItems((current) => {
+      const found = current.find((entry) => entry.id === item.id);
+      if (found) return current.map((entry) => entry.id === item.id ? { ...entry, quantity: entry.quantity + 1 } : entry);
+      return [...current, { id: item.id, name: item.name, price: Number(item.price || 0), quantity: 1 }];
+    });
+    setMenuVisible(false);
+  }
+
+  function updatePreorderQty(id: string, delta: number) {
+    setPreorderItems((current) => current
+      .map((item) => item.id === id ? { ...item, quantity: item.quantity + delta } : item)
+      .filter((item) => item.quantity > 0));
+  }
+
+  function resetBooking() {
+    setForm({
+      name: '',
+      phone: '',
+      date: new Date().toISOString().slice(0, 10),
+      time: '',
+      guests: '4',
+      specialRequests: '',
+    });
+    setPreorderItems([]);
+    switchReservationTab('details');
+  }
+
+  async function submit() {
+    if (!validateReservation()) return;
     setSubmitting(true);
     try {
-      await onSubmit(form);
-      setForm((current) => ({ ...current, specialRequests: '' }));
+      await onSubmit(form, preorderItems);
+      if (!preorderItems.length) resetBooking();
     } catch (error) {
       Alert.alert('Booking failed', error instanceof Error ? error.message : 'Could not book table.');
     } finally {
@@ -662,23 +761,179 @@ function BookingScreen({ onSubmit }: { onSubmit: (form: ReservationForm) => Prom
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.screen}
       contentContainerStyle={[styles.formScrollContent, { paddingBottom: 118 + Math.max(insets.bottom, 12) }]}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.screenTitle}>Book Table</Text>
-      <Text style={styles.screenSubtitle}>Reserve a table without placing a delivery order.</Text>
-      <View style={styles.panel}>
-        <TextInput style={styles.input} placeholder="Name" placeholderTextColor="#817767" value={form.name} onChangeText={(value) => update('name', value)} />
-        <TextInput style={styles.input} placeholder="Mobile number" placeholderTextColor="#817767" keyboardType="phone-pad" value={form.phone} onChangeText={(value) => update('phone', value)} />
-        <TextInput style={styles.input} placeholder="Date YYYY-MM-DD" placeholderTextColor="#817767" value={form.date} onChangeText={(value) => update('date', value)} />
-        <TextInput style={styles.input} placeholder="Time HH:mm" placeholderTextColor="#817767" value={form.time} onChangeText={(value) => update('time', value)} />
-        <TextInput style={styles.input} placeholder="Guests" placeholderTextColor="#817767" keyboardType="number-pad" value={form.guests} onChangeText={(value) => update('guests', value.replace(/\D/g, '').slice(0, 2))} />
-        <TextInput style={styles.input} placeholder="Special requests" placeholderTextColor="#817767" value={form.specialRequests} onChangeText={(value) => update('specialRequests', value)} multiline />
-        <Pressable style={[styles.primaryButton, submitting && styles.disabledButton]} disabled={submitting} onPress={submit}>
-          {submitting ? <ActivityIndicator color="#120f0a" /> : <Text style={styles.primaryButtonText}>Request Booking</Text>}
-        </Pressable>
+      <View style={styles.resHeading}>
+        <Text style={styles.screenTitle}>Reserve Your Table</Text>
+        <Text style={styles.screenSubtitle}>Secure your spot and pre-order signature dishes</Text>
       </View>
+      <View style={styles.resPremium}>
+        <View style={styles.resTabs}>
+          {([
+            ['details', 'calendar-month-outline', 'Table details'],
+            ['preorder', 'silverware-fork-knife', 'Pre-order menu'],
+            ['summary', 'clipboard-text-outline', 'Summary & Payment'],
+          ] as ['details' | 'preorder' | 'summary', NavIconName, string][]).map(([key, icon, label]) => (
+            <Pressable key={key} style={[styles.resTab, tab === key && styles.resTabActive]} onPress={() => key === 'preorder' ? goToPreorder() : key === 'summary' ? goToSummary() : switchReservationTab('details')}>
+              <MaterialCommunityIcons name={icon} size={16} color={tab === key ? '#120f0a' : '#ddd'} />
+              <Text style={[styles.resTabText, tab === key && styles.resTabTextActive]}>{label}</Text>
+              {key === 'preorder' ? <View style={styles.preorderBadge}><Text style={styles.preorderBadgeText}>{preorderCount}</Text></View> : null}
+            </Pressable>
+          ))}
+        </View>
+
+        {tab === 'details' ? (
+          <View style={styles.tabPane}>
+            <Text style={styles.formLabel}><MaterialCommunityIcons name="account-outline" size={14} color="#cda45e" /> Full name *</Text>
+            <TextInput style={styles.input} placeholder="John Doe" placeholderTextColor="#817767" value={form.name} onChangeText={(value) => update('name', value)} />
+            <Text style={styles.formLabel}><MaterialCommunityIcons name="phone-outline" size={14} color="#cda45e" /> Phone number *</Text>
+            <TextInput style={styles.input} placeholder="+91 98765 43210" placeholderTextColor="#817767" keyboardType="phone-pad" value={form.phone} onChangeText={(value) => update('phone', value)} />
+            <View style={styles.inlineFields}>
+              <View style={styles.inlineField}>
+                <Text style={styles.formLabel}><MaterialCommunityIcons name="calendar-today" size={14} color="#cda45e" /> Date *</Text>
+                <TextInput style={styles.input} placeholder="YYYY-MM-DD" placeholderTextColor="#817767" value={form.date} onChangeText={(value) => update('date', value)} />
+              </View>
+              <View style={styles.inlineField}>
+                <Text style={styles.formLabel}><MaterialCommunityIcons name="clock-outline" size={14} color="#cda45e" /> Time *</Text>
+                <TextInput style={styles.input} placeholder="HH:mm" placeholderTextColor="#817767" value={form.time} onChangeText={(value) => update('time', value)} />
+              </View>
+            </View>
+            <Text style={styles.formLabel}><MaterialCommunityIcons name="account-group-outline" size={14} color="#cda45e" /> Guests *</Text>
+            <View style={styles.guestGrid}>
+              {['1', '2', '3', '4', '5', '6', '7'].map((guest) => (
+                <Pressable key={guest} style={[styles.guestChip, form.guests === guest && styles.guestChipActive]} onPress={() => update('guests', guest)}>
+                  <Text style={[styles.guestChipText, form.guests === guest && styles.guestChipTextActive]}>{guest === '7' ? '7+' : guest}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.formLabel}><MaterialCommunityIcons name="comment-text-outline" size={14} color="#cda45e" /> Special requests</Text>
+            <TextInput style={[styles.input, styles.textArea]} placeholder="e.g., vegan options, anniversary celebration..." placeholderTextColor="#817767" value={form.specialRequests} onChangeText={(value) => update('specialRequests', value)} multiline />
+            <Pressable style={styles.resPrimaryAction} onPress={goToPreorder}>
+              <Text style={styles.primaryButtonText}>Continue to pre-order</Text>
+              <MaterialCommunityIcons name="arrow-right" size={18} color="#120f0a" />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {tab === 'preorder' ? (
+          <View style={styles.tabPane}>
+            <View style={styles.preorderHeader}>
+              <Text style={styles.preorderTitle}><MaterialCommunityIcons name="basket-outline" size={17} color="#cda45e" /> Your pre-order items</Text>
+              <Pressable style={styles.outlineGoldButton} onPress={() => setMenuVisible(true)}>
+                <MaterialCommunityIcons name="plus-circle-outline" size={16} color="#cda45e" />
+                <Text style={styles.outlineGoldText}>Browse full menu</Text>
+              </Pressable>
+            </View>
+            {preorderItems.length ? preorderItems.map((item) => (
+              <View key={item.id} style={styles.preorderItemCard}>
+                <View style={styles.preorderItemInfo}>
+                  <Text style={styles.preorderItemName}>{item.name}</Text>
+                  <Text style={styles.preorderItemMeta}>{price(item.price)} each</Text>
+                </View>
+                <View style={styles.preorderControls}>
+                  <View style={styles.preorderQty}>
+                    <Pressable style={styles.preorderQtyButton} onPress={() => updatePreorderQty(item.id, -1)}><Text style={styles.preorderQtyButtonText}>-</Text></Pressable>
+                    <Text style={styles.preorderQtyCount}>{item.quantity}</Text>
+                    <Pressable style={styles.preorderQtyButton} onPress={() => updatePreorderQty(item.id, 1)}><Text style={styles.preorderQtyButtonText}>+</Text></Pressable>
+                  </View>
+                  <Pressable style={styles.removeItemButton} onPress={() => setPreorderItems((current) => current.filter((entry) => entry.id !== item.id))}>
+                    <MaterialCommunityIcons name="trash-can-outline" size={14} color="#fff" />
+                    <Text style={styles.removeItemText}>Remove</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )) : (
+              <View style={styles.emptyPreorder}>
+                <MaterialCommunityIcons name="pizza" size={34} color="#9d927d" />
+                <Text style={styles.emptyDetail}>No items yet. Click "Browse full menu" to add delicious dishes.</Text>
+              </View>
+            )}
+            <View style={styles.preorderSubtotalRow}>
+              <Text style={styles.grandLabel}>Subtotal:</Text>
+              <Text style={styles.grandValue}>{price(preorderTotal)}</Text>
+            </View>
+            <View style={styles.resFooterActions}>
+              <Pressable style={styles.outlineGoldButtonLarge} onPress={() => switchReservationTab('details')}>
+                <MaterialCommunityIcons name="chevron-left" size={16} color="#cda45e" />
+                <Text style={styles.outlineGoldText}>Back</Text>
+              </Pressable>
+              <Pressable style={styles.resPrimaryActionCompact} onPress={goToSummary}>
+                <Text style={styles.primaryButtonText}>Review & Payment</Text>
+                <MaterialCommunityIcons name="chevron-right" size={17} color="#120f0a" />
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {tab === 'summary' ? (
+          <View style={styles.tabPane}>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryTitle}><MaterialCommunityIcons name="receipt-text-outline" size={17} color="#cda45e" /> Reservation details</Text>
+              {[
+                ['Name', form.name || '-'],
+                ['Phone', form.phone || '-'],
+                ['Date', form.date || '-'],
+                ['Time', form.time || '-'],
+                ['Guests', form.guests],
+              ].map(([label, value]) => (
+                <View key={label} style={styles.summaryRow}><Text style={styles.summaryLabel}>{label}</Text><Text style={styles.summaryValue}>{value}</Text></View>
+              ))}
+              {form.specialRequests ? <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Special requests</Text><Text style={styles.summaryValue}>{form.specialRequests}</Text></View> : null}
+              <Text style={[styles.summaryTitle, styles.summaryPreorderTitle]}><MaterialCommunityIcons name="hamburger" size={17} color="#cda45e" /> Pre-ordered items</Text>
+              {preorderItems.length ? preorderItems.map((item) => (
+                <Text key={item.id} style={styles.summaryItem}>{item.name} x {item.quantity} = {price(item.price * item.quantity)}</Text>
+              )) : <Text style={styles.emptyDetail}>No pre-ordered items.</Text>}
+              <View style={[styles.summaryRow, styles.summaryTotalRow]}><Text style={styles.grandLabel}>Total Amount</Text><Text style={styles.grandValue}>{price(preorderTotal)}</Text></View>
+            </View>
+            <View style={styles.resFooterActions}>
+              <Pressable style={styles.outlineGoldButtonLarge} onPress={() => switchReservationTab('preorder')}>
+                <MaterialCommunityIcons name="pencil-outline" size={16} color="#cda45e" />
+                <Text style={styles.outlineGoldText}>Edit order</Text>
+              </Pressable>
+              <Pressable style={[styles.resPrimaryActionCompact, submitting && styles.disabledButton]} disabled={submitting} onPress={submit}>
+                {submitting ? <ActivityIndicator color="#120f0a" /> : (
+                  <>
+                    <MaterialCommunityIcons name="lock-outline" size={16} color="#120f0a" />
+                    <Text style={styles.primaryButtonText}>{preorderTotal > 0 ? 'Confirm & Pay Now' : 'Confirm Reservation'}</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+      </View>
+
+      <Modal visible={menuVisible} animationType="slide" transparent onRequestClose={() => setMenuVisible(false)}>
+        <View style={styles.menuPickerOverlay}>
+          <View style={[styles.menuPickerCard, { paddingBottom: 16 + Math.max(insets.bottom, 12) }]}>
+            <View style={styles.rowBetween}>
+              <Text style={styles.menuPickerTitle}><MaterialCommunityIcons name="silverware-fork-knife" size={20} color="#cda45e" /> Our signature menu</Text>
+              <Pressable onPress={() => setMenuVisible(false)}><Text style={styles.closeText}>Close</Text></Pressable>
+            </View>
+            <FlatList
+              data={menu}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.menuPickerList}
+              renderItem={({ item }) => (
+                <Pressable style={styles.menuPickerItem} onPress={() => addPreorderItem(item)}>
+                  <View style={styles.menuPickerInfo}>
+                    <Text style={styles.preorderItemName}>{item.name}</Text>
+                    <Text style={styles.preorderItemMeta} numberOfLines={2}>{item.description}</Text>
+                    <Text style={styles.itemPrice}>{price(item.price)}</Text>
+                  </View>
+                  <View style={styles.addPreorderHint}>
+                    <MaterialCommunityIcons name="plus-circle" size={16} color="#cda45e" />
+                    <Text style={styles.outlineGoldText}>Add to pre-order</Text>
+                  </View>
+                </Pressable>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -992,6 +1247,62 @@ const styles = StyleSheet.create({
   navBadgeText: { color: '#120f0a', fontSize: 10, fontWeight: '900' },
   navText: { color: '#9d927d', fontWeight: '900', fontSize: 11, marginTop: 3 },
   navTextActive: { color: '#120f0a' },
+  resHeading: { alignItems: 'center', marginBottom: 14 },
+  resPremium: { backgroundColor: '#0f0d0a', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(205,164,94,0.25)', padding: 14, shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+  resTabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 12, marginBottom: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(205,164,94,0.3)' },
+  resTab: { minHeight: 38, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'transparent' },
+  resTabActive: { backgroundColor: '#cda45e', shadowColor: '#cda45e', shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
+  resTabText: { color: '#ddd', fontWeight: '800', fontSize: 12 },
+  resTabTextActive: { color: '#120f0a' },
+  preorderBadge: { minWidth: 22, height: 22, borderRadius: 11, backgroundColor: '#cda45e', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  preorderBadgeText: { color: '#120f0a', fontWeight: '900', fontSize: 11 },
+  tabPane: { gap: 2 },
+  formLabel: { color: '#cda45e', fontWeight: '800', fontSize: 13, marginBottom: 7, marginTop: 6 },
+  inlineFields: { flexDirection: 'row', gap: 10 },
+  inlineField: { flex: 1 },
+  textArea: { minHeight: 78, textAlignVertical: 'top' },
+  guestGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  guestChip: { width: 42, height: 38, borderRadius: 999, borderWidth: 1, borderColor: '#3a2f20', alignItems: 'center', justifyContent: 'center', backgroundColor: '#15110c' },
+  guestChipActive: { backgroundColor: '#cda45e', borderColor: '#cda45e' },
+  guestChipText: { color: '#cda45e', fontWeight: '900' },
+  guestChipTextActive: { color: '#120f0a' },
+  resPrimaryAction: { alignSelf: 'flex-end', minHeight: 46, borderRadius: 999, paddingHorizontal: 16, marginTop: 12, backgroundColor: '#cda45e', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  resPrimaryActionCompact: { minHeight: 44, borderRadius: 999, paddingHorizontal: 14, backgroundColor: '#cda45e', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, flexShrink: 1 },
+  preorderHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 14 },
+  preorderTitle: { color: '#cda45e', fontWeight: '900', fontSize: 16 },
+  outlineGoldButton: { minHeight: 38, borderRadius: 999, borderWidth: 1, borderColor: '#cda45e', paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  outlineGoldButtonLarge: { minHeight: 44, borderRadius: 999, borderWidth: 1, borderColor: '#cda45e', paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  outlineGoldText: { color: '#cda45e', fontWeight: '800', fontSize: 12 },
+  preorderItemCard: { backgroundColor: 'rgba(42,38,33,0.86)', borderRadius: 8, padding: 12, marginBottom: 10, borderLeftWidth: 3, borderLeftColor: '#cda45e', gap: 10 },
+  preorderItemInfo: { flex: 1 },
+  preorderItemName: { color: '#f6e6c6', fontWeight: '900', fontSize: 15 },
+  preorderItemMeta: { color: '#b0a89b', marginTop: 4, fontSize: 12, lineHeight: 17 },
+  preorderControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  preorderQty: { minHeight: 38, borderRadius: 999, backgroundColor: '#1e1b17', paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  preorderQtyButton: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#cda45e', alignItems: 'center', justifyContent: 'center' },
+  preorderQtyButtonText: { color: '#120f0a', fontWeight: '900', fontSize: 16 },
+  preorderQtyCount: { color: '#f6e6c6', minWidth: 24, textAlign: 'center', fontWeight: '900' },
+  removeItemButton: { minHeight: 34, borderRadius: 999, backgroundColor: '#ab2e3f', paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  removeItemText: { color: '#fff', fontWeight: '800', fontSize: 12 },
+  emptyPreorder: { alignItems: 'center', paddingVertical: 26, paddingHorizontal: 14 },
+  preorderSubtotalRow: { marginTop: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#3a352e', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  resFooterActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 18 },
+  summaryCard: { backgroundColor: '#1a1814', borderRadius: 8, padding: 16, marginBottom: 4, borderWidth: 1, borderColor: '#2c2418' },
+  summaryTitle: { color: '#cda45e', fontWeight: '900', fontSize: 16, marginBottom: 12 },
+  summaryPreorderTitle: { marginTop: 14 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderBottomColor: '#3a352e', borderStyle: 'dashed', paddingBottom: 8, marginBottom: 9 },
+  summaryLabel: { color: '#b8ab91', flex: 1 },
+  summaryValue: { color: '#f6e6c6', fontWeight: '800', flex: 1, textAlign: 'right' },
+  summaryItem: { color: '#f6e6c6', marginBottom: 8, lineHeight: 20 },
+  summaryTotalRow: { borderBottomWidth: 0, marginTop: 8, marginBottom: 0 },
+  menuPickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'flex-end' },
+  menuPickerCard: { maxHeight: '86%', backgroundColor: '#1a1814', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 16, borderWidth: 1, borderColor: '#cda45e' },
+  menuPickerTitle: { color: '#cda45e', fontWeight: '900', fontSize: 19 },
+  menuPickerList: { paddingTop: 12, paddingBottom: 10 },
+  menuPickerItem: { backgroundColor: '#1f1c18', borderRadius: 8, borderWidth: 1, borderColor: '#2c2418', padding: 13, marginBottom: 10 },
+  menuPickerInfo: { gap: 2 },
+  itemPrice: { color: '#cda45e', fontWeight: '900', marginTop: 6 },
+  addPreorderHint: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 9 },
   orderCard: { backgroundColor: '#1a1814', borderRadius: 8, padding: 14, borderWidth: 1, borderColor: '#2c2418', marginBottom: 12 },
   orderNumber: { color: '#f6e6c6', fontWeight: '900' },
   statusBadge: { color: '#120f0a', backgroundColor: '#cda45e', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, overflow: 'hidden', fontWeight: '900' },
