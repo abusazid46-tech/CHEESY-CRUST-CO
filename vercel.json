@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/mobile/:path*",
+      "destination": "/api/mobile/:path*"
+    },
+    {
+      "source": "/api/v1/:path*",
+      "destination": "/api/v1/:path*"
+    }
+  ]
+}
