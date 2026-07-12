@@ -24,6 +24,7 @@ import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-
 import { WebView } from 'react-native-webview';
 
 const API_BASE = 'https://whitesmoke-jay-438498.hostingersite.com/api/v1';
+const API_TIMEOUT_MS = 18000;
 const DELIVERY_PINCODES = ['788001', '788002', '788003', '788004', '788005'];
 const TOKEN_KEY = 'cheesy_mobile_token';
 const REFRESH_KEY = 'cheesy_mobile_refresh';
@@ -227,9 +228,13 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}, token?
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
-  } catch {
-    const error: ApiError = new Error('Unable to reach the server. Check your internet connection.');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers, signal: controller.signal });
+    clearTimeout(timeout);
+  } catch (reason) {
+    const detail = reason instanceof Error ? reason.message : String(reason || 'Network request failed');
+    const error: ApiError = new Error(`Unable to reach Cheesy Crust server. ${detail}`);
     throw error;
   }
 
@@ -343,7 +348,12 @@ function AppShell() {
         setToken(savedToken);
         setSession((current) => current || { access_token: savedToken, refresh_token: savedRefresh || undefined });
       }
-      await Promise.all([loadMenu(), loadBusinessSettings(), loadOffers()]);
+      const [menuResult, settingsResult, offersResult] = await Promise.allSettled([loadMenu(), loadBusinessSettings(), loadOffers()]);
+      if (menuResult.status === 'rejected') {
+        showNotice('error', menuResult.reason instanceof Error ? menuResult.reason.message : 'Failed to load menu.');
+      }
+      if (settingsResult.status === 'rejected') setBusinessSettings(DEFAULT_BUSINESS_SETTINGS);
+      if (offersResult.status === 'rejected') setOffers([]);
     } catch (error) {
       showNotice('error', error instanceof Error ? error.message : 'Failed to load app data.');
     } finally {
@@ -362,7 +372,11 @@ function AppShell() {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([loadMenu(), loadOffers()]);
+      const [menuResult, offersResult] = await Promise.allSettled([loadMenu(), loadOffers()]);
+      if (menuResult.status === 'rejected') {
+        showNotice('error', menuResult.reason instanceof Error ? menuResult.reason.message : 'Refresh failed.');
+      }
+      if (offersResult.status === 'rejected') setOffers([]);
       if (screen === 'orders') await loadOrders();
     } catch (error) {
       showNotice('error', error instanceof Error ? error.message : 'Refresh failed.');
