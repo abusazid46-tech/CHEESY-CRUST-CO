@@ -2,6 +2,7 @@
 requireAdminAuth();
 
 let offers = [];
+let editingOfferId = null;
 
 async function loadOffers() {
     try {
@@ -54,8 +55,11 @@ function renderOffers() {
                     </div>
                 </div>
                 <div class="d-flex justify-content-between mt-3 pt-2 border-top" style="border-color: #3a352e !important;">
-                    <small>${offer.startDate || 'Now'} - ${offer.endDate || 'Until cancelled'}</small>
+                    <small>${offer.startDate || 'Now'} - ${offer.endDate || 'Until cancelled'}${offer.imageUrl || offer.image_url ? ' • Banner set' : ''}</small>
                     <div>
+                        <button class="btn-icon me-2" onclick="editOffer('${offer._id}')" style="width: 32px; height: 32px;" title="Edit">
+                            <i class="fas fa-pen"></i>
+                        </button>
                         <button class="btn-icon me-2" onclick="toggleOffer('${offer._id}')" style="width: 32px; height: 32px;" title="Toggle">
                             <i class="fas fa-power-off"></i>
                         </button>
@@ -70,8 +74,30 @@ function renderOffers() {
 }
 
 function openAddOfferModal() {
+    editingOfferId = null;
     document.getElementById('offerForm').reset();
     document.getElementById('offerActive').checked = true;
+    document.querySelector('#offerModal .modal-title').innerText = 'Create Offer';
+    document.querySelector('#offerModal .btn-gold').innerText = 'Save Offer';
+    new bootstrap.Modal(document.getElementById('offerModal')).show();
+}
+
+function editOffer(offerId) {
+    const offer = offers.find(item => String(item._id || item.id) === String(offerId));
+    if (!offer) return;
+    editingOfferId = String(offer._id || offer.id);
+    document.getElementById('offerTitle').value = offer.title || '';
+    document.getElementById('offerDesc').value = offer.description || '';
+    document.getElementById('offerImageUrl').value = offer.imageUrl || offer.image_url || '';
+    document.getElementById('offerDiscountType').value = offer.discountType || offer.discount_type || 'percentage';
+    document.getElementById('offerDiscountValue').value = offer.discountValue ?? offer.discount_value ?? 0;
+    document.getElementById('offerCode').value = offer.code || '';
+    document.getElementById('offerStart').value = offer.startDate || '';
+    document.getElementById('offerEnd').value = offer.endDate || '';
+    document.getElementById('offerMinOrder').value = offer.minOrder ?? offer.min_order ?? 0;
+    document.getElementById('offerActive').checked = offer.is_active !== false;
+    document.querySelector('#offerModal .modal-title').innerText = 'Edit Offer';
+    document.querySelector('#offerModal .btn-gold').innerText = 'Update Offer';
     new bootstrap.Modal(document.getElementById('offerModal')).show();
 }
 
@@ -79,6 +105,7 @@ async function saveOffer() {
     const offer = {
         title: document.getElementById('offerTitle').value.trim(),
         description: document.getElementById('offerDesc').value.trim(),
+        imageUrl: document.getElementById('offerImageUrl').value.trim(),
         discountType: document.getElementById('offerDiscountType').value,
         discountValue: Number(document.getElementById('offerDiscountValue').value || 0),
         code: document.getElementById('offerCode').value.trim(),
@@ -94,13 +121,23 @@ async function saveOffer() {
     }
 
     try {
-        await adminApi.createOffer(offer);
+        const wasEditing = Boolean(editingOfferId);
+        if (editingOfferId) {
+            await adminApi.updateOffer(editingOfferId, offer);
+        } else {
+            await adminApi.createOffer(offer);
+        }
         bootstrap.Modal.getInstance(document.getElementById('offerModal')).hide();
+        editingOfferId = null;
         await loadOffers();
-        showAdminToast('Offer created successfully!');
+        showAdminToast(wasEditing ? 'Offer updated successfully!' : 'Offer saved successfully!');
     } catch (error) {
         offer._id = String(Date.now());
-        offers.push(offer);
+        if (editingOfferId) {
+            offers = offers.map(item => String(item._id || item.id) === editingOfferId ? { ...item, ...offer, _id: editingOfferId } : item);
+        } else {
+            offers.push(offer);
+        }
         localStorage.setItem('admin_offers', JSON.stringify(offers));
         renderOffers();
         showAdminToast('Offer saved locally. Server update failed.', 'warning');

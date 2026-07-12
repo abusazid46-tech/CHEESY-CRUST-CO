@@ -65,6 +65,20 @@ type PreorderItem = {
 
 type BusinessSettings = typeof DEFAULT_BUSINESS_SETTINGS;
 
+type Offer = {
+  id: string;
+  title: string;
+  description: string;
+  code: string;
+  imageUrl: string;
+  discountType: 'percentage' | 'flat' | 'bogo' | string;
+  discountValue: number;
+  minOrder: number;
+  startDate?: string | null;
+  endDate?: string | null;
+  is_active: boolean;
+};
+
 type Session = {
   access_token: string;
   refresh_token?: string;
@@ -145,6 +159,53 @@ function isDeliveryPincodeAllowed(value: string) {
   return DELIVERY_PINCODES.includes(normalizePincode(value));
 }
 
+function normalizeOffer(offer: any): Offer {
+  return {
+    id: String(offer.id || offer._id || ''),
+    title: offer.title || 'Offer',
+    description: offer.description || '',
+    code: String(offer.code || '').trim().toUpperCase(),
+    imageUrl: offer.imageUrl || offer.image_url || '',
+    discountType: offer.discountType || offer.discount_type || 'percentage',
+    discountValue: Number(offer.discountValue ?? offer.discount_value ?? 0),
+    minOrder: Number(offer.minOrder ?? offer.min_order ?? 0),
+    startDate: offer.startDate || null,
+    endDate: offer.endDate || null,
+    is_active: offer.is_active !== false,
+  };
+}
+
+function isOfferInDate(offer: Offer) {
+  if (!offer.is_active) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (offer.startDate) {
+    const start = new Date(offer.startDate);
+    start.setHours(0, 0, 0, 0);
+    if (today < start) return false;
+  }
+  if (offer.endDate) {
+    const end = new Date(offer.endDate);
+    end.setHours(23, 59, 59, 999);
+    if (today > end) return false;
+  }
+  return true;
+}
+
+function offerDiscount(offer: Offer | null, total: number, cart: CartItem[]) {
+  if (!offer || !isOfferInDate(offer) || total < offer.minOrder) return 0;
+  if (offer.discountType === 'bogo') {
+    const prices: number[] = [];
+    cart.forEach((item) => {
+      for (let i = 0; i < item.quantity; i += 1) prices.push(Number(item.price || 0));
+    });
+    return prices.length >= 2 ? Math.min(...prices) : 0;
+  }
+  if (offer.discountType === 'percentage') return Math.min(total, Math.round(total * Math.min(offer.discountValue, 100) / 100));
+  if (offer.discountType === 'flat') return Math.min(total, offer.discountValue);
+  return 0;
+}
+
 async function apiRequest<T>(endpoint: string, options: RequestInit = {}, token?: string | null): Promise<T> {
   const headers = new Headers(options.headers || {});
   if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
@@ -218,6 +279,7 @@ function AppShell() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
+  const [offers, setOffers] = useState<Offer[]>([]);
   const [businessSettings, setBusinessSettings] = useState<BusinessSettings>(DEFAULT_BUSINESS_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -244,6 +306,11 @@ function AppShell() {
     setBusinessSettings({ ...DEFAULT_BUSINESS_SETTINGS, ...(response.settings || {}) });
   }, []);
 
+  const loadOffers = useCallback(async () => {
+    const response = await apiRequest<{ offers?: any[] }>('/admin/offers/active');
+    setOffers((response.offers || []).map(normalizeOffer));
+  }, []);
+
   const loadOrders = useCallback(async () => {
     if (!token) {
       setOrders([]);
@@ -262,13 +329,13 @@ function AppShell() {
         setToken(savedToken);
         setSession((current) => current || { access_token: savedToken, refresh_token: savedRefresh || undefined });
       }
-      await Promise.all([loadMenu(), loadBusinessSettings()]);
+      await Promise.all([loadMenu(), loadBusinessSettings(), loadOffers()]);
     } catch (error) {
       showNotice('error', error instanceof Error ? error.message : 'Failed to load app data.');
     } finally {
       setLoading(false);
     }
-  }, [loadBusinessSettings, loadMenu, showNotice]);
+  }, [loadBusinessSettings, loadMenu, loadOffers, showNotice]);
 
   useEffect(() => {
     bootstrap();
@@ -281,14 +348,14 @@ function AppShell() {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await loadMenu();
+      await Promise.all([loadMenu(), loadOffers()]);
       if (screen === 'orders') await loadOrders();
     } catch (error) {
       showNotice('error', error instanceof Error ? error.message : 'Refresh failed.');
     } finally {
       setRefreshing(false);
     }
-  }, [loadMenu, loadOrders, screen, showNotice]);
+  }, [loadMenu, loadOffers, loadOrders, screen, showNotice]);
 
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart]);
   const cartCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
@@ -329,7 +396,7 @@ function AppShell() {
     showNotice('info', 'Signed out.');
   }
 
-  async function checkout(orderType: OrderType, address: string, pincode: string) {
+  async function checkout(orderType: OrderType, address: string, pincode: string, promoCode?: string | null) {
     if (!token) {
       setAuthVisible(true);
       showNotice('info', 'Sign in to place your order.');
@@ -361,6 +428,7 @@ function AppShell() {
       order_type: orderType,
       address: orderType === 'delivery' ? address : null,
       pincode: orderType === 'delivery' ? normalizePincode(pincode) : null,
+      promo_code: promoCode || null,
     };
 
     const order = await authedRequest<any>('/orders/create', {
@@ -478,10 +546,10 @@ function AppShell() {
 
       <View style={styles.content}>
         {screen === 'menu' ? (
-          <MenuScreen menu={menu} cartCount={cartCount} onAdd={addToCart} refreshing={refreshing} onRefresh={refresh} />
+          <MenuScreen menu={menu} cartCount={cartCount} offers={offers} onAdd={addToCart} refreshing={refreshing} onRefresh={refresh} />
         ) : null}
         {screen === 'cart' ? (
-          <CartScreen cart={cart} total={cartTotal} settings={businessSettings} onQty={changeCartQty} onCheckout={checkout} busy={Boolean(payment)} />
+          <CartScreen cart={cart} total={cartTotal} settings={businessSettings} offers={offers} onQty={changeCartQty} onCheckout={checkout} busy={Boolean(payment)} />
         ) : null}
         {screen === 'booking' ? <BookingScreen menu={menu} onSubmit={createReservation} /> : null}
         {screen === 'orders' ? (
@@ -519,12 +587,14 @@ function AppShell() {
 function MenuScreen({
   menu,
   cartCount,
+  offers,
   onAdd,
   refreshing,
   onRefresh,
 }: {
   menu: MenuItem[];
   cartCount: number;
+  offers: Offer[];
   onAdd: (item: MenuItem) => void;
   refreshing: boolean;
   onRefresh: () => void;
@@ -532,6 +602,7 @@ function MenuScreen({
   const [category, setCategory] = useState('all');
   const categories = useMemo(() => ['all', ...Array.from(new Set(menu.map((item) => item.category)))], [menu]);
   const filtered = category === 'all' ? menu : menu.filter((item) => item.category === category);
+  const heroOffer = offers.find((offer) => isOfferInDate(offer) && offer.imageUrl);
 
   return (
     <View style={styles.screen}>
@@ -545,6 +616,18 @@ function MenuScreen({
           <MaterialCommunityIcons name="chef-hat" size={30} color="#120f0a" />
         </View>
       </View>
+      {heroOffer ? (
+        <View style={styles.offerHero}>
+          <Image source={{ uri: heroOffer.imageUrl }} style={styles.offerHeroImage} />
+          <View style={styles.offerHeroShade} />
+          <View style={styles.offerHeroCopy}>
+            <Text style={styles.offerHeroKicker}>Limited offer</Text>
+            <Text style={styles.offerHeroTitle} numberOfLines={1}>{heroOffer.title}</Text>
+            <Text style={styles.offerHeroText} numberOfLines={2}>{heroOffer.description || (heroOffer.code ? `Use ${heroOffer.code} at checkout` : 'Apply from cart')}</Text>
+          </View>
+          {heroOffer.code ? <Text style={styles.offerHeroCode}>{heroOffer.code}</Text> : null}
+        </View>
+      ) : null}
       <View style={styles.categoryRailOuter}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRail} contentContainerStyle={styles.categoryRailContent}>
           {categories.map((cat) => (
@@ -594,6 +677,7 @@ function CartScreen({
   cart,
   total,
   settings,
+  offers,
   onQty,
   onCheckout,
   busy,
@@ -601,16 +685,46 @@ function CartScreen({
   cart: CartItem[];
   total: number;
   settings: BusinessSettings;
+  offers: Offer[];
   onQty: (itemId: string, delta: number) => void;
-  onCheckout: (type: OrderType, address: string, pincode: string) => Promise<void>;
+  onCheckout: (type: OrderType, address: string, pincode: string, promoCode?: string | null) => Promise<void>;
   busy: boolean;
 }) {
   const [orderType, setOrderType] = useState<OrderType>('delivery');
   const [address, setAddress] = useState('');
   const [pincode, setPincode] = useState('');
+  const [promoCode, setPromoCode] = useState('');
+  const [appliedOffer, setAppliedOffer] = useState<Offer | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const insets = useSafeAreaInsets();
   const deliveryFee = orderType === 'delivery' && total < settings.freeDeliveryThreshold ? settings.deliveryFee : 0;
+  const validOffers = offers.filter(isOfferInDate);
+  const discount = offerDiscount(appliedOffer, total, cart);
+  const grandTotal = Math.max(0, total + deliveryFee - discount);
+
+  function applyOffer(code: string) {
+    const normalized = code.trim().toUpperCase();
+    if (!normalized) {
+      Alert.alert('Offer', 'Enter a promo code.');
+      return;
+    }
+    const offer = validOffers.find((item) => item.code === normalized);
+    if (!offer) {
+      Alert.alert('Offer', 'Promo code is not active.');
+      return;
+    }
+    if (total < offer.minOrder) {
+      Alert.alert('Offer', `This offer requires minimum order of ${price(offer.minOrder)}.`);
+      return;
+    }
+    setAppliedOffer(offer);
+    setPromoCode(offer.code);
+  }
+
+  function removeOffer() {
+    setAppliedOffer(null);
+    setPromoCode('');
+  }
 
   async function submit() {
     if (total < settings.minOrderAmount) {
@@ -619,7 +733,7 @@ function CartScreen({
     }
     setSubmitting(true);
     try {
-      await onCheckout(orderType, address, pincode);
+      await onCheckout(orderType, address, pincode, appliedOffer?.code || null);
     } catch (error) {
       Alert.alert('Checkout', error instanceof Error ? error.message : 'Could not start checkout.');
     } finally {
@@ -670,9 +784,36 @@ function CartScreen({
           </>
         ) : null}
 
+        {validOffers.length ? (
+          <View style={styles.offerPanel}>
+            <Text style={styles.panelTitle}>Offers</Text>
+            {validOffers.slice(0, 2).map((offer) => (
+              <Pressable key={offer.id} style={styles.mobileOfferCard} onPress={() => applyOffer(offer.code)}>
+                {offer.imageUrl ? <Image source={{ uri: offer.imageUrl }} style={styles.mobileOfferThumb} /> : null}
+                <View style={styles.mobileOfferCopy}>
+                  <Text style={styles.mobileOfferTitle}>{offer.title}</Text>
+                  <Text style={styles.mobileOfferMeta}>{offer.code ? `Use ${offer.code}` : 'Apply at checkout'}{offer.minOrder ? ` • Min ${price(offer.minOrder)}` : ''}</Text>
+                </View>
+              </Pressable>
+            ))}
+            <View style={styles.promoRow}>
+              <TextInput style={[styles.input, styles.promoInput]} placeholder="Promo code" placeholderTextColor="#817767" autoCapitalize="characters" value={promoCode} onChangeText={(value) => setPromoCode(value.toUpperCase())} />
+              <Pressable style={styles.promoButton} onPress={() => applyOffer(promoCode)}>
+                <Text style={styles.primaryButtonText}>Apply</Text>
+              </Pressable>
+              {appliedOffer ? (
+                <Pressable style={styles.promoRemoveButton} onPress={removeOffer}>
+                  <MaterialCommunityIcons name="close" size={18} color="#cda45e" />
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.totalRow}><Text style={styles.totalLabel}>Subtotal</Text><Text style={styles.totalValue}>{price(total)}</Text></View>
+        {discount > 0 ? <View style={styles.totalRow}><Text style={styles.discountLabel}>Offer discount</Text><Text style={styles.discountValue}>-{price(discount)}</Text></View> : null}
         <View style={styles.totalRow}><Text style={styles.totalLabel}>Delivery</Text><Text style={styles.totalValue}>{price(deliveryFee)}</Text></View>
-        <View style={styles.totalRow}><Text style={styles.grandLabel}>Total</Text><Text style={styles.grandValue}>{price(total + deliveryFee)}</Text></View>
+        <View style={styles.totalRow}><Text style={styles.grandLabel}>Total</Text><Text style={styles.grandValue}>{price(grandTotal)}</Text></View>
         <Pressable disabled={submitting || busy} style={[styles.primaryButton, (submitting || busy) && styles.disabledButton]} onPress={submit}>
           {submitting || busy ? <ActivityIndicator color="#120f0a" /> : <Text style={styles.primaryButtonText}>Proceed to Payment</Text>}
         </Pressable>
@@ -1209,6 +1350,14 @@ const styles = StyleSheet.create({
   formScrollContent: { flexGrow: 1 },
   heroPanel: { backgroundColor: '#1a150e', borderWidth: 1, borderColor: '#312717', borderRadius: 8, padding: 16, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOpacity: 0.26, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
   heroIcon: { width: 54, height: 54, borderRadius: 8, backgroundColor: '#cda45e', alignItems: 'center', justifyContent: 'center' },
+  offerHero: { height: 142, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#3a2f20', marginBottom: 14, backgroundColor: '#1a150e', justifyContent: 'flex-end' },
+  offerHeroImage: { ...StyleSheet.absoluteFill, width: '100%', height: '100%' },
+  offerHeroShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.34)' },
+  offerHeroCopy: { padding: 14, paddingRight: 92 },
+  offerHeroKicker: { color: '#f3cf82', fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  offerHeroTitle: { color: '#fff0cc', fontSize: 22, fontWeight: '900', marginTop: 2 },
+  offerHeroText: { color: '#efe2c3', marginTop: 4, lineHeight: 19 },
+  offerHeroCode: { position: 'absolute', top: 12, right: 12, backgroundColor: '#cda45e', color: '#120f0a', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, overflow: 'hidden', fontWeight: '900' },
   kicker: { color: '#cda45e', fontSize: 12, fontWeight: '900', textTransform: 'uppercase', marginBottom: 4 },
   screenTitle: { color: '#fff0cc', fontSize: 28, fontWeight: '900' },
   screenSubtitle: { color: '#b8ab91', marginTop: 4, marginBottom: 2 },
@@ -1248,6 +1397,16 @@ const styles = StyleSheet.create({
   qtyCount: { color: '#f6e6c6', minWidth: 22, textAlign: 'center', fontWeight: '800' },
   panel: { backgroundColor: '#1a1814', borderRadius: 8, borderWidth: 1, borderColor: '#2c2418', padding: 14, marginTop: 10 },
   panelTitle: { color: '#f6e6c6', fontSize: 17, fontWeight: '800', marginBottom: 10 },
+  offerPanel: { backgroundColor: 'rgba(205,164,94,0.08)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(205,164,94,0.24)', padding: 12, marginBottom: 12 },
+  mobileOfferCard: { minHeight: 62, backgroundColor: '#11100d', borderRadius: 8, borderWidth: 1, borderColor: '#332817', marginBottom: 9, overflow: 'hidden', flexDirection: 'row', alignItems: 'center' },
+  mobileOfferThumb: { width: 86, height: 62, backgroundColor: '#292217' },
+  mobileOfferCopy: { flex: 1, paddingHorizontal: 10, paddingVertical: 8 },
+  mobileOfferTitle: { color: '#fff0cc', fontWeight: '900' },
+  mobileOfferMeta: { color: '#cda45e', marginTop: 4, fontSize: 12, fontWeight: '700' },
+  promoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  promoInput: { flex: 1, marginBottom: 0 },
+  promoButton: { minHeight: 48, borderRadius: 8, backgroundColor: '#cda45e', paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' },
+  promoRemoveButton: { width: 42, height: 48, borderRadius: 8, borderWidth: 1, borderColor: '#cda45e', alignItems: 'center', justifyContent: 'center' },
   segment: { flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: '#2f271b', overflow: 'hidden', marginBottom: 12 },
   segmentButton: { flex: 1, padding: 12, alignItems: 'center' },
   segmentButtonActive: { backgroundColor: '#cda45e' },
@@ -1258,6 +1417,8 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   totalLabel: { color: '#9d927d' },
   totalValue: { color: '#f6e6c6', fontWeight: '700' },
+  discountLabel: { color: '#79d98b', fontWeight: '800' },
+  discountValue: { color: '#79d98b', fontWeight: '900' },
   grandLabel: { color: '#f6e6c6', fontSize: 18, fontWeight: '900' },
   grandValue: { color: '#cda45e', fontSize: 18, fontWeight: '900' },
   nav: { flexDirection: 'row', paddingHorizontal: 10, paddingTop: 8, paddingBottom: 10, borderTopWidth: 1, borderTopColor: '#302616', backgroundColor: '#17120c', shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: -6 }, elevation: 10 },

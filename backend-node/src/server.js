@@ -488,6 +488,8 @@ function normalizeOffer(row) {
     _id: idString(row.id),
     title: data.title || row.title || "Offer",
     description: data.description || row.description || "",
+    imageUrl: data.imageUrl || data.image_url || data.bannerImageUrl || data.banner_image_url || "",
+    image_url: data.imageUrl || data.image_url || data.bannerImageUrl || data.banner_image_url || "",
     discountType,
     discount_type: discountType,
     discountValue,
