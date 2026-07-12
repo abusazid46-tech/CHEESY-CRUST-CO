@@ -23,7 +23,7 @@ import {
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 
-const API_BASE = 'https://cheesy-crust-co-7w5c.vercel.app/api/v1';
+const API_BASE = 'https://www.cheesycrustco.in/api/mobile';
 const API_TIMEOUT_MS = 18000;
 const DELIVERY_PINCODES = ['788001', '788002', '788003', '788004', '788005'];
 const TOKEN_KEY = 'cheesy_mobile_token';
