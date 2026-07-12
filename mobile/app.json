@@ -12,10 +12,6 @@
     "android": {
       "package": "com.cheesycrustco.app",
       "versionCode": 2,
-      "permissions": [
-        "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE"
-      ],
       "adaptiveIcon": {
         "backgroundColor": "#0D0B08",
         "foregroundImage": "./assets/android-icon-foreground.png",
