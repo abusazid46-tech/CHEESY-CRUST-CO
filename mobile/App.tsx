@@ -160,17 +160,18 @@ function isDeliveryPincodeAllowed(value: string) {
 }
 
 function normalizeOffer(offer: any): Offer {
+  const data = offer.data || {};
   return {
     id: String(offer.id || offer._id || ''),
-    title: offer.title || 'Offer',
-    description: offer.description || '',
-    code: String(offer.code || '').trim().toUpperCase(),
-    imageUrl: offer.imageUrl || offer.image_url || '',
-    discountType: offer.discountType || offer.discount_type || 'percentage',
-    discountValue: Number(offer.discountValue ?? offer.discount_value ?? 0),
-    minOrder: Number(offer.minOrder ?? offer.min_order ?? 0),
-    startDate: offer.startDate || null,
-    endDate: offer.endDate || null,
+    title: offer.title || data.title || 'Offer',
+    description: offer.description || data.description || '',
+    code: String(offer.code || data.code || '').trim().toUpperCase(),
+    imageUrl: offer.imageUrl || offer.image_url || data.imageUrl || data.image_url || '',
+    discountType: offer.discountType || offer.discount_type || data.discountType || data.discount_type || 'percentage',
+    discountValue: Number(offer.discountValue ?? offer.discount_value ?? data.discountValue ?? data.discount_value ?? 0),
+    minOrder: Number(offer.minOrder ?? offer.min_order ?? data.minOrder ?? data.min_order ?? 0),
+    startDate: offer.startDate || data.startDate || null,
+    endDate: offer.endDate || data.endDate || null,
     is_active: offer.is_active !== false,
   };
 }

@@ -4,6 +4,10 @@ requireAdminAuth();
 let offers = [];
 let editingOfferId = null;
 
+function offerField(offer, key, fallback = '') {
+    return offer[key] ?? offer.data?.[key] ?? fallback;
+}
+
 async function loadOffers() {
     try {
         const response = await adminApi.getOffers();
@@ -35,27 +39,27 @@ function renderOffers() {
             <div class="stat-card">
                 <div class="d-flex justify-content-between align-items-start mb-3">
                     <div>
-                        <h6 style="color: var(--gold);">${offer.title}</h6>
-                        <small class="text-muted">${offer.description || ''}</small>
+                        <h6 style="color: var(--gold);">${offerField(offer, 'title')}</h6>
+                        <small class="text-muted">${offerField(offer, 'description')}</small>
                     </div>
                     <span class="badge-status ${offer.is_active !== false ? 'badge-delivered' : 'badge-cancelled'}">${offer.is_active !== false ? 'Active' : 'Inactive'}</span>
                 </div>
                 <div class="row text-center">
                     <div class="col-4">
-                        <div class="stat-value" style="font-size: 1.2rem;">${offer.discountType === 'percentage' ? offer.discountValue + '%' : formatCurrency(offer.discountValue || 0)}</div>
+                        <div class="stat-value" style="font-size: 1.2rem;">${(offerField(offer, 'discountType') || offerField(offer, 'discount_type')) === 'percentage' ? offerField(offer, 'discountValue', offerField(offer, 'discount_value', 0)) + '%' : formatCurrency(offerField(offer, 'discountValue', offerField(offer, 'discount_value', 0)) || 0)}</div>
                         <div class="stat-label">Discount</div>
                     </div>
                     <div class="col-4">
-                        <div class="stat-value" style="font-size: 1.2rem;">${offer.code || 'N/A'}</div>
+                        <div class="stat-value" style="font-size: 1.2rem;">${offerField(offer, 'code', 'N/A') || 'N/A'}</div>
                         <div class="stat-label">Promo Code</div>
                     </div>
                     <div class="col-4">
-                        <div class="stat-value" style="font-size: 1.2rem;">${formatCurrency(offer.minOrder || 0)}</div>
+                        <div class="stat-value" style="font-size: 1.2rem;">${formatCurrency(offerField(offer, 'minOrder', offerField(offer, 'min_order', 0)) || 0)}</div>
                         <div class="stat-label">Min Order</div>
                     </div>
                 </div>
                 <div class="d-flex justify-content-between mt-3 pt-2 border-top" style="border-color: #3a352e !important;">
-                    <small>${offer.startDate || 'Now'} - ${offer.endDate || 'Until cancelled'}${offer.imageUrl || offer.image_url ? ' • Banner set' : ''}</small>
+                    <small>${offerField(offer, 'startDate', 'Now')} - ${offerField(offer, 'endDate', 'Until cancelled')}${offerField(offer, 'imageUrl') || offerField(offer, 'image_url') ? ' • Banner set' : ''}</small>
                     <div>
                         <button class="btn-icon me-2" onclick="editOffer('${offer._id}')" style="width: 32px; height: 32px;" title="Edit">
                             <i class="fas fa-pen"></i>
@@ -86,15 +90,15 @@ function editOffer(offerId) {
     const offer = offers.find(item => String(item._id || item.id) === String(offerId));
     if (!offer) return;
     editingOfferId = String(offer._id || offer.id);
-    document.getElementById('offerTitle').value = offer.title || '';
-    document.getElementById('offerDesc').value = offer.description || '';
-    document.getElementById('offerImageUrl').value = offer.imageUrl || offer.image_url || '';
-    document.getElementById('offerDiscountType').value = offer.discountType || offer.discount_type || 'percentage';
-    document.getElementById('offerDiscountValue').value = offer.discountValue ?? offer.discount_value ?? 0;
-    document.getElementById('offerCode').value = offer.code || '';
-    document.getElementById('offerStart').value = offer.startDate || '';
-    document.getElementById('offerEnd').value = offer.endDate || '';
-    document.getElementById('offerMinOrder').value = offer.minOrder ?? offer.min_order ?? 0;
+    document.getElementById('offerTitle').value = offerField(offer, 'title');
+    document.getElementById('offerDesc').value = offerField(offer, 'description');
+    document.getElementById('offerImageUrl').value = offerField(offer, 'imageUrl') || offerField(offer, 'image_url');
+    document.getElementById('offerDiscountType').value = offerField(offer, 'discountType') || offerField(offer, 'discount_type', 'percentage');
+    document.getElementById('offerDiscountValue').value = offerField(offer, 'discountValue') ?? offerField(offer, 'discount_value', 0);
+    document.getElementById('offerCode').value = offerField(offer, 'code');
+    document.getElementById('offerStart').value = offerField(offer, 'startDate');
+    document.getElementById('offerEnd').value = offerField(offer, 'endDate');
+    document.getElementById('offerMinOrder').value = offerField(offer, 'minOrder') ?? offerField(offer, 'min_order', 0);
     document.getElementById('offerActive').checked = offer.is_active !== false;
     document.querySelector('#offerModal .modal-title').innerText = 'Edit Offer';
     document.querySelector('#offerModal .btn-gold').innerText = 'Update Offer';
