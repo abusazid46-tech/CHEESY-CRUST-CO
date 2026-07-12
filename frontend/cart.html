@@ -104,6 +104,34 @@
       padding: 3rem;
       color: #888;
     }
+    .offers-panel {
+      background: rgba(205,164,94,0.07);
+      border: 1px solid rgba(205,164,94,0.22);
+      border-radius: 14px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .offer-card {
+      border: 1px solid rgba(205,164,94,0.22);
+      border-radius: 12px;
+      padding: .85rem;
+      margin-bottom: .75rem;
+      background: #11100d;
+    }
+    .offer-code {
+      display: inline-block;
+      color: #0c0b09;
+      background: var(--gold);
+      border-radius: 999px;
+      padding: .15rem .6rem;
+      font-weight: 700;
+      letter-spacing: .03em;
+      font-size: .78rem;
+    }
+    .offer-applied {
+      color: #79d98b;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -121,9 +149,25 @@
   <div id="cart-items-container"></div>
   
   <div class="cart-summary mt-4" id="cart-summary" style="display: none;">
+    <div class="offers-panel" id="offers-panel" style="display: none;">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <strong style="color: var(--gold);"><i class="fas fa-tags"></i> Offers</strong>
+        <small id="applied-offer-label" class="offer-applied"></small>
+      </div>
+      <div id="active-offers"></div>
+      <div class="input-group mt-2">
+        <input type="text" class="form-control" id="promoCode" placeholder="Enter promo code" style="background: #0c0b09; color: white; border-color: #3a352e;">
+        <button class="btn btn-gold" id="applyPromoBtn" type="button">Apply</button>
+        <button class="btn btn-outline-gold" id="removePromoBtn" type="button" style="display: none;">Remove</button>
+      </div>
+    </div>
     <div class="d-flex justify-content-between mb-3">
       <span>Subtotal</span>
       <span id="cart-subtotal">₹0</span>
+    </div>
+    <div class="d-flex justify-content-between mb-3" id="discount-row" style="display: none;">
+      <span>Offer Discount</span>
+      <span id="offer-discount" style="color: #79d98b;">-₹0</span>
     </div>
     <div class="d-flex justify-content-between mb-3">
       <span>Delivery Fee</span>

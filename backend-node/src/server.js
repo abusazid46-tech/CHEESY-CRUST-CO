@@ -476,6 +476,80 @@ function total(items) {
   return (items || []).reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
 }
 
+function normalizeOffer(row) {
+  const data = toJson(row.data, {});
+  const discountType = data.discountType || data.discount_type || row.discount_type || "percentage";
+  const discountValue = Number(data.discountValue ?? data.discount_value ?? row.discount_value ?? 0);
+  const minOrder = Number(data.minOrder ?? data.min_order ?? 0);
+  const code = String(data.code || row.code || "").trim().toUpperCase();
+  return {
+    ...data,
+    id: idString(row.id),
+    _id: idString(row.id),
+    title: data.title || row.title || "Offer",
+    description: data.description || row.description || "",
+    discountType,
+    discount_type: discountType,
+    discountValue,
+    discount_value: discountValue,
+    code,
+    startDate: data.startDate || data.start_date || null,
+    endDate: data.endDate || data.end_date || null,
+    minOrder,
+    min_order: minOrder,
+    is_active: Boolean(row.is_active),
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
+
+function isOfferCurrentlyValid(offer, subtotal) {
+  if (!offer || !offer.is_active) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (offer.startDate) {
+    const start = new Date(offer.startDate);
+    start.setHours(0, 0, 0, 0);
+    if (today < start) return false;
+  }
+  if (offer.endDate) {
+    const end = new Date(offer.endDate);
+    end.setHours(23, 59, 59, 999);
+    if (today > end) return false;
+  }
+  return subtotal >= Number(offer.minOrder || 0);
+}
+
+function offerDiscount(offer, subtotal, items = []) {
+  if (!isOfferCurrentlyValid(offer, subtotal)) return 0;
+  const value = Number(offer.discountValue || 0);
+  if (offer.discountType === "bogo") {
+    const unitPrices = [];
+    for (const item of items || []) {
+      for (let i = 0; i < Number(item.quantity || 1); i += 1) unitPrices.push(Number(item.price || 0));
+    }
+    return unitPrices.length >= 2 ? Math.min(...unitPrices) : 0;
+  }
+  if (value <= 0) return 0;
+  if (offer.discountType === "percentage") return Math.min(subtotal, Math.round((subtotal * Math.min(value, 100)) / 100));
+  if (offer.discountType === "flat") return Math.min(subtotal, value);
+  return 0;
+}
+
+async function findActiveOffer(identifier, subtotal) {
+  const code = String(identifier || "").trim().toUpperCase();
+  if (!code) return null;
+  const [rows] = await db.query("SELECT * FROM offers WHERE is_active=1 ORDER BY created_at DESC");
+  const offer = rows.map(normalizeOffer).find((item) => item.code === code || item.id === code);
+  if (!offer) return null;
+  if (!isOfferCurrentlyValid(offer, subtotal)) {
+    const error = new Error(subtotal < Number(offer.minOrder || 0) ? `Offer requires minimum order of ₹${offer.minOrder}` : "This offer is not currently valid");
+    error.status = 400;
+    throw error;
+  }
+  return offer;
+}
+
 const staticDir = [
   process.env.STATIC_DIR,
   path.join(__dirname, "..", "frontend"),
@@ -677,11 +751,17 @@ app.post(`${API_PREFIX}/orders/create`, authRequired, asyncRoute(async (req, res
   const subtotal = total(items);
   if (subtotal < business.minOrderAmount) return res.status(400).json({ detail: `Minimum order amount is ₹${business.minOrderAmount}` });
   const deliveryFee = req.body.order_type === "delivery" && subtotal < business.freeDeliveryThreshold ? business.deliveryFee : 0;
-  const grand = subtotal + deliveryFee;
+  const offer = await findActiveOffer(req.body.promo_code || req.body.offer_code || req.body.offer_id, subtotal);
+  const discount = offer ? offerDiscount(offer, subtotal, items) : 0;
+  const grand = Math.max(0, subtotal + deliveryFee - discount);
   const number = orderNumber();
   const deliveryAddress = req.body.order_type === "delivery" ? `${String(req.body.address).trim()}\nPIN: ${deliveryPincode}` : null;
-  const [result] = await db.execute("INSERT INTO orders (order_number,user_id,items,subtotal,delivery_fee,total,order_type,address,notes,status,payment_status) VALUES (?,?,?,?,?,?,?,?,?, 'pending','pending')", [number, req.user.id, JSON.stringify(items), subtotal, deliveryFee, grand, req.body.order_type, deliveryAddress, req.body.notes || null]);
-  res.json({ success: true, message: "Order created successfully", order_id: idString(result.insertId), order_number: number, total: grand });
+  const orderNotes = {
+    note: req.body.notes || null,
+    offer: offer ? { id: offer.id, title: offer.title, code: offer.code, discount } : null
+  };
+  const [result] = await db.execute("INSERT INTO orders (order_number,user_id,items,subtotal,delivery_fee,total,order_type,address,notes,status,payment_status) VALUES (?,?,?,?,?,?,?,?,?, 'pending','pending')", [number, req.user.id, JSON.stringify(items), subtotal, deliveryFee, grand, req.body.order_type, deliveryAddress, JSON.stringify(orderNotes)]);
+  res.json({ success: true, message: "Order created successfully", order_id: idString(result.insertId), order_number: number, subtotal, delivery_fee: deliveryFee, discount, offer: orderNotes.offer, total: grand });
 }));
 app.get(`${API_PREFIX}/orders/user`, authRequired, asyncRoute(async (req, res) => {
   const [rows] = await db.execute("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 50", [req.user.id]);
@@ -895,18 +975,26 @@ for (const key of ["business-hours", "delivery", "notifications"]) {
 }
 app.get(`${API_PREFIX}/admin/offers`, adminRequired, asyncRoute(async (_req, res) => {
   const [rows] = await db.query("SELECT * FROM offers ORDER BY created_at DESC");
-  res.json({ success: true, offers: rows.map((o) => ({ ...o, _id: idString(o.id), data: toJson(o.data, {}) })) });
+  res.json({ success: true, offers: rows.map(normalizeOffer) });
+}));
+app.get(`${API_PREFIX}/offers/active`, asyncRoute(async (_req, res) => {
+  const [rows] = await db.query("SELECT * FROM offers WHERE is_active=1 ORDER BY created_at DESC");
+  res.json({ success: true, offers: rows.map(normalizeOffer).filter((offer) => isOfferCurrentlyValid(offer, Number.MAX_SAFE_INTEGER)) });
 }));
 app.get(`${API_PREFIX}/admin/offers/active`, asyncRoute(async (_req, res) => {
   const [rows] = await db.query("SELECT * FROM offers WHERE is_active=1 ORDER BY created_at DESC");
-  res.json({ success: true, offers: rows.map((o) => ({ ...o, _id: idString(o.id), data: toJson(o.data, {}) })) });
+  res.json({ success: true, offers: rows.map(normalizeOffer) });
 }));
 app.post(`${API_PREFIX}/admin/offers`, adminRequired, asyncRoute(async (req, res) => {
-  const [result] = await db.execute("INSERT INTO offers (title,description,discount_type,discount_value,is_active,data) VALUES (?,?,?,?,?,?)", [req.body.title || "Offer", req.body.description || null, req.body.discount_type || null, req.body.discount_value || null, req.body.is_active === false ? 0 : 1, JSON.stringify(req.body)]);
+  const discountType = req.body.discountType || req.body.discount_type || null;
+  const discountValue = req.body.discountValue ?? req.body.discount_value ?? null;
+  const [result] = await db.execute("INSERT INTO offers (title,description,discount_type,discount_value,is_active,data) VALUES (?,?,?,?,?,?)", [req.body.title || "Offer", req.body.description || null, discountType, discountValue, req.body.is_active === false ? 0 : 1, JSON.stringify(req.body)]);
   res.json({ success: true, offer: { ...req.body, id: idString(result.insertId), _id: idString(result.insertId) } });
 }));
 app.put(`${API_PREFIX}/admin/offers/:id`, adminRequired, asyncRoute(async (req, res) => {
-  await db.execute("UPDATE offers SET title=COALESCE(?,title), description=COALESCE(?,description), is_active=COALESCE(?,is_active), data=? WHERE id=?", [req.body.title || null, req.body.description || null, req.body.is_active === undefined ? null : (req.body.is_active ? 1 : 0), JSON.stringify(req.body), req.params.id]);
+  const discountType = req.body.discountType || req.body.discount_type || null;
+  const discountValue = req.body.discountValue ?? req.body.discount_value ?? null;
+  await db.execute("UPDATE offers SET title=COALESCE(?,title), description=COALESCE(?,description), discount_type=COALESCE(?,discount_type), discount_value=COALESCE(?,discount_value), is_active=COALESCE(?,is_active), data=? WHERE id=?", [req.body.title || null, req.body.description || null, discountType, discountValue, req.body.is_active === undefined ? null : (req.body.is_active ? 1 : 0), JSON.stringify(req.body), req.params.id]);
   res.json({ success: true, offer: { ...req.body, id: req.params.id, _id: req.params.id } });
 }));
 app.patch(`${API_PREFIX}/admin/offers/:id/toggle`, adminRequired, asyncRoute(async (req, res) => {

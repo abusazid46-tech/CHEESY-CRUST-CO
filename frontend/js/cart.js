@@ -6,6 +6,8 @@ let businessSettings = {
     freeDeliveryThreshold: 500,
     minOrderAmount: 100
 };
+let activeOffers = [];
+let appliedOffer = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadCart();
@@ -18,10 +20,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('checkoutBtn')?.addEventListener('click', checkout);
+    document.getElementById('applyPromoBtn')?.addEventListener('click', applyPromoCode);
+    document.getElementById('removePromoBtn')?.addEventListener('click', removePromoCode);
 });
 
 async function loadCart() {
     await loadBusinessSettings();
+    await loadActiveOffers();
     cartItems = localCart().map(normalizeCartItem);
 
     if (isAuthenticated()) {
@@ -90,9 +95,11 @@ function renderCart() {
     `).join('');
 
     const deliveryFee = getDeliveryFee();
+    const discount = getOfferDiscount();
     document.getElementById('cart-subtotal').innerText = formatPrice(cartSubtotal);
     document.getElementById('delivery-fee').innerText = formatPrice(deliveryFee);
-    document.getElementById('cart-total').innerText = formatPrice(cartSubtotal + deliveryFee);
+    document.getElementById('cart-total').innerText = formatPrice(cartSubtotal + deliveryFee - discount);
+    renderOffers();
 }
 
 async function loadBusinessSettings() {
@@ -102,6 +109,129 @@ async function loadBusinessSettings() {
     } catch (error) {
         console.warn('Using default cart settings:', error.message);
     }
+}
+
+async function loadActiveOffers() {
+    try {
+        const response = await api.request('/offers/active');
+        activeOffers = (response.offers || []).map(normalizeOffer).filter(offer => offer.discountValue > 0 || offer.discountType === 'bogo');
+    } catch (error) {
+        console.warn('Active offers unavailable:', error.message);
+        activeOffers = [];
+    }
+}
+
+function normalizeOffer(offer) {
+    return {
+        id: String(offer._id || offer.id || ''),
+        title: offer.title || 'Offer',
+        description: offer.description || '',
+        code: String(offer.code || '').trim().toUpperCase(),
+        discountType: offer.discountType || offer.discount_type || 'percentage',
+        discountValue: Number(offer.discountValue ?? offer.discount_value ?? 0),
+        minOrder: Number(offer.minOrder ?? offer.min_order ?? 0),
+        startDate: offer.startDate || null,
+        endDate: offer.endDate || null,
+        is_active: offer.is_active !== false
+    };
+}
+
+function isOfferUsable(offer) {
+    return offer && offer.is_active && cartSubtotal >= Number(offer.minOrder || 0);
+}
+
+function calculateOfferDiscount(offer) {
+    if (!isOfferUsable(offer)) return 0;
+    if (offer.discountType === 'bogo') {
+        const unitPrices = [];
+        cartItems.forEach(item => {
+            for (let i = 0; i < Number(item.quantity || 1); i += 1) unitPrices.push(Number(item.price || 0));
+        });
+        return unitPrices.length >= 2 ? Math.min(...unitPrices) : 0;
+    }
+    if (offer.discountType === 'percentage') {
+        return Math.min(cartSubtotal, Math.round(cartSubtotal * Math.min(Number(offer.discountValue || 0), 100) / 100));
+    }
+    if (offer.discountType === 'flat') {
+        return Math.min(cartSubtotal, Number(offer.discountValue || 0));
+    }
+    return 0;
+}
+
+function getOfferDiscount() {
+    if (!appliedOffer) return 0;
+    if (!isOfferUsable(appliedOffer)) {
+        appliedOffer = null;
+        document.getElementById('promoCode').value = '';
+        showToast('Applied offer removed because the cart no longer meets its conditions.', 'info');
+        return 0;
+    }
+    return calculateOfferDiscount(appliedOffer);
+}
+
+function renderOffers() {
+    const panel = document.getElementById('offers-panel');
+    const list = document.getElementById('active-offers');
+    const discountRow = document.getElementById('discount-row');
+    const discountText = document.getElementById('offer-discount');
+    const label = document.getElementById('applied-offer-label');
+    const removeButton = document.getElementById('removePromoBtn');
+    if (!panel || !list) return;
+
+    panel.style.display = activeOffers.length ? 'block' : 'none';
+    list.innerHTML = activeOffers.slice(0, 3).map(offer => {
+        const disabled = !isOfferUsable(offer);
+        const value = offer.discountType === 'percentage' ? `${offer.discountValue}% off` : offer.discountType === 'bogo' ? 'Buy one get one' : `${formatPrice(offer.discountValue)} off`;
+        return `
+            <div class="offer-card">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div>
+                        <strong>${escapeHtml(offer.title)}</strong>
+                        <div class="small text-muted">${escapeHtml(offer.description || value)}</div>
+                        ${offer.minOrder ? `<small style="color: #cda45e;">Min order ${formatPrice(offer.minOrder)}</small>` : ''}
+                    </div>
+                    ${offer.code ? `<button class="btn-outline-gold" type="button" onclick="selectOfferCode('${escapeJs(offer.code)}')" ${disabled ? 'disabled' : ''}><span class="offer-code">${escapeHtml(offer.code)}</span></button>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    const discount = appliedOffer ? calculateOfferDiscount(appliedOffer) : 0;
+    discountRow.style.display = discount > 0 ? 'flex' : 'none';
+    discountText.innerText = `-${formatPrice(discount)}`;
+    label.innerText = appliedOffer ? `Applied: ${appliedOffer.code || appliedOffer.title}` : '';
+    removeButton.style.display = appliedOffer ? 'block' : 'none';
+}
+
+function selectOfferCode(code) {
+    document.getElementById('promoCode').value = code;
+    applyPromoCode();
+}
+
+function applyPromoCode() {
+    const code = String(document.getElementById('promoCode')?.value || '').trim().toUpperCase();
+    if (!code) {
+        showToast('Enter a promo code.', 'warning');
+        return;
+    }
+    const offer = activeOffers.find(item => item.code === code);
+    if (!offer) {
+        showToast('Promo code is not active.', 'error');
+        return;
+    }
+    if (!isOfferUsable(offer)) {
+        showToast(`This offer requires minimum order of ${formatPrice(offer.minOrder)}.`, 'error');
+        return;
+    }
+    appliedOffer = offer;
+    showToast(`${offer.title} applied.`, 'success');
+    renderCart();
+}
+
+function removePromoCode() {
+    appliedOffer = null;
+    document.getElementById('promoCode').value = '';
+    renderCart();
 }
 
 async function updateQuantity(id, delta) {
@@ -194,10 +324,13 @@ async function processCheckout(orderType, address, pincode = '') {
         total: cartSubtotal + getDeliveryFee(),
         order_type: orderType,
         address: orderType === 'delivery' ? address : null,
-        pincode: orderType === 'delivery' ? pincode : null
+        pincode: orderType === 'delivery' ? pincode : null,
+        promo_code: appliedOffer?.code || null
     };
 
     const order = await api.createOrder(orderData);
+    orderData.total = Number(order.total || orderData.total);
+    orderData.discount = Number(order.discount || 0);
     const paymentOrder = await api.createPaymentOrder(order.total, order.order_id, null);
 
     if (!window.Razorpay) {
