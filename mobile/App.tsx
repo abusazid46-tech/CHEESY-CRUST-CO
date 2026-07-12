@@ -702,6 +702,14 @@ function CartScreen({
   const validOffers = offers.filter(isOfferInDate);
   const discount = offerDiscount(appliedOffer, total, cart);
   const grandTotal = Math.max(0, total + deliveryFee - discount);
+  const typedOffer = validOffers.find((item) => item.code === promoCode.trim().toUpperCase());
+  const typedOfferShortfall = typedOffer ? Math.max(0, typedOffer.minOrder - total) : 0;
+
+  useEffect(() => {
+    if (appliedOffer && (!isOfferInDate(appliedOffer) || total < appliedOffer.minOrder)) {
+      setAppliedOffer(null);
+    }
+  }, [appliedOffer, total]);
 
   function applyOffer(code: string) {
     const normalized = code.trim().toUpperCase();
@@ -793,7 +801,10 @@ function CartScreen({
                 {offer.imageUrl ? <Image source={{ uri: offer.imageUrl }} style={styles.mobileOfferThumb} /> : null}
                 <View style={styles.mobileOfferCopy}>
                   <Text style={styles.mobileOfferTitle}>{offer.title}</Text>
-                  <Text style={styles.mobileOfferMeta}>{offer.code ? `Use ${offer.code}` : 'Apply at checkout'}{offer.minOrder ? ` • Min ${price(offer.minOrder)}` : ''}</Text>
+                  <Text style={styles.mobileOfferMeta}>
+                    {offer.code ? `Use ${offer.code}` : 'Apply at checkout'}
+                    {offer.minOrder ? total < offer.minOrder ? ` • Add ${price(offer.minOrder - total)} more` : ` • Eligible` : ''}
+                  </Text>
                 </View>
               </Pressable>
             ))}
@@ -808,6 +819,11 @@ function CartScreen({
                 </Pressable>
               ) : null}
             </View>
+            {typedOffer && typedOfferShortfall > 0 ? (
+              <Text style={styles.promoHint}>Add <Text style={styles.promoHintStrong}>{price(typedOfferShortfall)}</Text> more to apply {typedOffer.code}.</Text>
+            ) : appliedOffer ? (
+              <Text style={styles.promoHint}>Applied <Text style={styles.promoHintStrong}>{appliedOffer.code}</Text>.</Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -1408,6 +1424,8 @@ const styles = StyleSheet.create({
   promoInput: { flex: 1, marginBottom: 0 },
   promoButton: { minHeight: 48, borderRadius: 8, backgroundColor: '#cda45e', paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' },
   promoRemoveButton: { width: 42, height: 48, borderRadius: 8, borderWidth: 1, borderColor: '#cda45e', alignItems: 'center', justifyContent: 'center' },
+  promoHint: { color: '#b8ab91', marginTop: 8, lineHeight: 18, fontSize: 12 },
+  promoHintStrong: { color: '#cda45e', fontWeight: '900' },
   segment: { flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: '#2f271b', overflow: 'hidden', marginBottom: 12 },
   segmentButton: { flex: 1, padding: 12, alignItems: 'center' },
   segmentButtonActive: { backgroundColor: '#cda45e' },
