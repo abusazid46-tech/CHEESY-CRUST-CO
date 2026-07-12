@@ -27,6 +27,7 @@ const API_BASE = 'https://whitesmoke-jay-438498.hostingersite.com/api/v1';
 const DELIVERY_PINCODES = ['788001', '788002', '788003', '788004', '788005'];
 const TOKEN_KEY = 'cheesy_mobile_token';
 const REFRESH_KEY = 'cheesy_mobile_refresh';
+const BRAND_LOGO = require('./assets/website-logo.png');
 const DEFAULT_BUSINESS_SETTINGS = {
   deliveryFee: 40,
   freeDeliveryThreshold: 500,
@@ -260,7 +261,7 @@ function NoticeBar({ notice, onDismiss }: { notice: Notice | null; onDismiss: ()
 function LogoMark({ size = 46 }: { size?: number }) {
   return (
     <View style={[styles.logoMark, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[styles.logoMarkText, { fontSize: Math.round(size * 0.44) }]}>C</Text>
+      <Image source={BRAND_LOGO} style={styles.logoImage} />
     </View>
   );
 }
@@ -1356,8 +1357,8 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#2f271b', backgroundColor: '#17120c' },
   headerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingRight: 12 },
   headerCopy: { flex: 1, marginLeft: 12 },
-  logoMark: { backgroundColor: '#cda45e', borderWidth: 1, borderColor: '#f5e0ad', alignItems: 'center', justifyContent: 'center', shadowColor: '#cda45e', shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
-  logoMarkText: { color: '#120f0a', fontWeight: '900' },
+  logoMark: { backgroundColor: '#0d0b08', borderWidth: 1, borderColor: '#cda45e', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', shadowColor: '#cda45e', shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  logoImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   brand: { color: '#fff0cc', fontSize: 23, fontWeight: '900', letterSpacing: 0 },
   subBrand: { color: '#b8ab91', marginTop: 3, fontSize: 12 },
   authPill: { backgroundColor: '#cda45e', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 6, shadowColor: '#cda45e', shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
