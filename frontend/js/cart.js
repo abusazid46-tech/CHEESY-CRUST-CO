@@ -137,7 +137,37 @@ function normalizeOffer(offer) {
 }
 
 function isOfferUsable(offer) {
-    return offer && offer.is_active && cartSubtotal >= Number(offer.minOrder || 0);
+    if (!offer || !offer.is_active) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (offer.startDate) {
+        const start = new Date(offer.startDate);
+        start.setHours(0, 0, 0, 0);
+        if (today < start) return false;
+    }
+    if (offer.endDate) {
+        const end = new Date(offer.endDate);
+        end.setHours(23, 59, 59, 999);
+        if (today > end) return false;
+    }
+    return cartSubtotal >= Number(offer.minOrder || 0);
+}
+
+function offerStatusText(offer) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (offer.startDate) {
+        const start = new Date(offer.startDate);
+        start.setHours(0, 0, 0, 0);
+        if (today < start) return `Starts ${offer.startDate}`;
+    }
+    if (offer.endDate) {
+        const end = new Date(offer.endDate);
+        end.setHours(23, 59, 59, 999);
+        if (today > end) return 'Expired';
+    }
+    if (cartSubtotal < Number(offer.minOrder || 0)) return `Min order ${formatPrice(offer.minOrder)}`;
+    return '';
 }
 
 function calculateOfferDiscount(offer) {
@@ -182,13 +212,14 @@ function renderOffers() {
     list.innerHTML = activeOffers.slice(0, 3).map(offer => {
         const disabled = !isOfferUsable(offer);
         const value = offer.discountType === 'percentage' ? `${offer.discountValue}% off` : offer.discountType === 'bogo' ? 'Buy one get one' : `${formatPrice(offer.discountValue)} off`;
+        const status = offerStatusText(offer);
         return `
             <div class="offer-card">
                 <div class="d-flex justify-content-between align-items-start gap-2">
                     <div>
                         <strong>${escapeHtml(offer.title)}</strong>
                         <div class="small text-muted">${escapeHtml(offer.description || value)}</div>
-                        ${offer.minOrder ? `<small style="color: #cda45e;">Min order ${formatPrice(offer.minOrder)}</small>` : ''}
+                        ${status ? `<small style="color: #cda45e;">${escapeHtml(status)}</small>` : ''}
                     </div>
                     ${offer.code ? `<button class="btn-outline-gold" type="button" onclick="selectOfferCode('${escapeJs(offer.code)}')" ${disabled ? 'disabled' : ''}><span class="offer-code">${escapeHtml(offer.code)}</span></button>` : ''}
                 </div>
@@ -220,7 +251,7 @@ function applyPromoCode() {
         return;
     }
     if (!isOfferUsable(offer)) {
-        showToast(`This offer requires minimum order of ${formatPrice(offer.minOrder)}.`, 'error');
+        showToast(offerStatusText(offer) || 'This offer is not available for this cart.', 'error');
         return;
     }
     appliedOffer = offer;
