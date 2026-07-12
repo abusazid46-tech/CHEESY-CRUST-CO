@@ -36,9 +36,21 @@ const DEFAULT_BUSINESS_SETTINGS = {
   maxGuests: 8,
 };
 
-type Screen = 'menu' | 'cart' | 'booking' | 'orders' | 'profile';
+const ABOUT_IMAGES = {
+  dining: 'https://www.lights4fun.co.uk/cdn/shop/files/Alfresco-Ding-Table-Festoon-Light-Canopy_1_2000x2000_9336b364-eb37-40f3-850b-a19ed900750f.jpg?auto=compress&cs=tinysrgb&w=800',
+  ambience: 'https://images.pexels.com/photos/842571/pexels-photo-842571.jpeg?auto=compress&cs=tinysrgb&w=800',
+};
+
+type Screen = 'menu' | 'cart' | 'booking' | 'about' | 'orders' | 'profile';
 type OrderType = 'delivery' | 'takeaway';
 type NavIconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
+
+const ABOUT_POINTS: { icon: NavIconName; text: string }[] = [
+  { icon: 'check-circle', text: 'Authentic recipes with generations old secret dough' },
+  { icon: 'crown', text: 'Premium ambience with elegant noir dining' },
+  { icon: 'fire', text: 'Wood-fired perfection with gold-dusted crust' },
+  { icon: 'glass-wine', text: 'Curated wine and craft beer selection' },
+];
 
 type MenuItem = {
   id: string;
@@ -554,6 +566,7 @@ function AppShell() {
           <CartScreen cart={cart} total={cartTotal} settings={businessSettings} offers={offers} onQty={changeCartQty} onCheckout={checkout} busy={Boolean(payment)} />
         ) : null}
         {screen === 'booking' ? <BookingScreen menu={menu} onSubmit={createReservation} /> : null}
+        {screen === 'about' ? <AboutScreen /> : null}
         {screen === 'orders' ? (
           <OrdersScreen orders={orders} token={token} onLogin={() => setAuthVisible(true)} onRefresh={loadOrders} />
         ) : null}
@@ -565,6 +578,7 @@ function AppShell() {
           ['menu', 'Menu', 'silverware-fork-knife'],
           ['cart', 'Cart', 'shopping-outline'],
           ['booking', 'Book', 'calendar-star'],
+          ['about', 'About', 'information-outline'],
           ['orders', 'Orders', 'receipt-text-outline'],
           ['profile', 'Profile', 'account-outline'],
         ] as [Screen, string, NavIconName][]).map(([key, label, icon]) => (
@@ -1118,6 +1132,56 @@ function BookingScreen({ menu, onSubmit }: { menu: MenuItem[]; onSubmit: (form: 
   );
 }
 
+function AboutScreen() {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.aboutContent, { paddingBottom: 118 + Math.max(insets.bottom, 12) }]}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.heroPanel}>
+        <View>
+          <Text style={styles.kicker}>About Cheesy Crust</Text>
+          <Text style={styles.screenTitle}>Born in Silchar</Text>
+          <Text style={styles.screenSubtitle}>Served with passion since 2010</Text>
+        </View>
+        <View style={styles.heroIcon}>
+          <MaterialCommunityIcons name="silverware-variant" size={30} color="#120f0a" />
+        </View>
+      </View>
+
+      <View style={styles.aboutImageStage}>
+        <Image source={{ uri: ABOUT_IMAGES.dining }} style={styles.aboutMainImage} />
+        <View style={styles.aboutImageShade} />
+        <View style={styles.aboutSmallImageWrap}>
+          <Image source={{ uri: ABOUT_IMAGES.ambience }} style={styles.aboutSmallImage} />
+        </View>
+      </View>
+
+      <View style={styles.aboutPanel}>
+        <Text style={styles.aboutTitle}>Born in Silchar,{'\n'}Served with Passion</Text>
+        <Text style={styles.aboutBody}>
+          Since 2010, Cheesy Crust Co. has redefined comfort food with artisan techniques,
+          fresh local ingredients, and an atmosphere that whispers elegance.
+        </Text>
+
+        <View style={styles.aboutChecklist}>
+          {ABOUT_POINTS.map((point) => (
+            <View key={point.text} style={styles.aboutPoint}>
+              <View style={styles.aboutPointIcon}>
+                <MaterialCommunityIcons name={point.icon} size={18} color="#120f0a" />
+              </View>
+              <Text style={styles.aboutPointText}>{point.text}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
 function OrdersScreen({ orders, token, onLogin, onRefresh }: { orders: any[]; token: string | null; onLogin: () => void; onRefresh: () => Promise<void> }) {
   const [refreshing, setRefreshing] = useState(false);
   async function refresh() {
@@ -1366,6 +1430,19 @@ const styles = StyleSheet.create({
   content: { flex: 1 },
   screen: { flex: 1, paddingHorizontal: 16, paddingTop: 14 },
   formScrollContent: { flexGrow: 1 },
+  aboutContent: { flexGrow: 1 },
+  aboutImageStage: { height: 238, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#3a2f20', backgroundColor: '#1a150e', marginBottom: 14 },
+  aboutMainImage: { width: '100%', height: '100%' },
+  aboutImageShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.16)' },
+  aboutSmallImageWrap: { position: 'absolute', right: 14, bottom: 14, width: 116, height: 96, borderRadius: 8, borderWidth: 2, borderColor: '#cda45e', overflow: 'hidden', backgroundColor: '#0d0b08', shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
+  aboutSmallImage: { width: '100%', height: '100%' },
+  aboutPanel: { backgroundColor: '#17130e', borderRadius: 8, borderWidth: 1, borderColor: '#332817', padding: 16, shadowColor: '#000', shadowOpacity: 0.26, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
+  aboutTitle: { color: '#fff0cc', fontSize: 27, fontWeight: '900', lineHeight: 34 },
+  aboutBody: { color: '#cfc4ad', lineHeight: 22, marginTop: 12 },
+  aboutChecklist: { marginTop: 16, gap: 10 },
+  aboutPoint: { minHeight: 48, borderRadius: 8, backgroundColor: '#11100d', borderWidth: 1, borderColor: '#2f271b', paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  aboutPointIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#cda45e', alignItems: 'center', justifyContent: 'center' },
+  aboutPointText: { flex: 1, color: '#f3e6c8', fontWeight: '800', lineHeight: 19 },
   heroPanel: { backgroundColor: '#1a150e', borderWidth: 1, borderColor: '#312717', borderRadius: 8, padding: 16, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOpacity: 0.26, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
   heroIcon: { width: 54, height: 54, borderRadius: 8, backgroundColor: '#cda45e', alignItems: 'center', justifyContent: 'center' },
   offerHero: { height: 142, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#3a2f20', marginBottom: 14, backgroundColor: '#1a150e', justifyContent: 'flex-end' },
@@ -1441,13 +1518,13 @@ const styles = StyleSheet.create({
   discountValue: { color: '#79d98b', fontWeight: '900' },
   grandLabel: { color: '#f6e6c6', fontSize: 18, fontWeight: '900' },
   grandValue: { color: '#cda45e', fontSize: 18, fontWeight: '900' },
-  nav: { flexDirection: 'row', paddingHorizontal: 10, paddingTop: 8, paddingBottom: 10, borderTopWidth: 1, borderTopColor: '#302616', backgroundColor: '#17120c', shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: -6 }, elevation: 10 },
+  nav: { flexDirection: 'row', paddingHorizontal: 8, paddingTop: 8, paddingBottom: 10, borderTopWidth: 1, borderTopColor: '#302616', backgroundColor: '#17120c', shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: -6 }, elevation: 10 },
   navButton: { flex: 1, minHeight: 58, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
   navButtonActive: { backgroundColor: '#cda45e' },
   navIconWrap: { minHeight: 24, alignItems: 'center', justifyContent: 'center' },
   navBadge: { position: 'absolute', right: -11, top: -8, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: '#fff0cc', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   navBadgeText: { color: '#120f0a', fontSize: 10, fontWeight: '900' },
-  navText: { color: '#9d927d', fontWeight: '900', fontSize: 11, marginTop: 3 },
+  navText: { color: '#9d927d', fontWeight: '900', fontSize: 10, marginTop: 3 },
   navTextActive: { color: '#120f0a' },
   resHeading: { alignItems: 'center', marginBottom: 14 },
   resPremium: { backgroundColor: '#0f0d0a', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(205,164,94,0.25)', padding: 14, shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
