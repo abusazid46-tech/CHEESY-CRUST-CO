@@ -113,7 +113,7 @@ async function loadBusinessSettings() {
 
 async function loadActiveOffers() {
     try {
-        const response = await api.request('/offers/active');
+        const response = await api.request('/admin/offers/active');
         activeOffers = (response.offers || []).map(normalizeOffer).filter(offer => offer.discountValue > 0 || offer.discountType === 'bogo');
     } catch (error) {
         console.warn('Active offers unavailable:', error.message);
