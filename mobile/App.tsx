@@ -27,6 +27,13 @@ const API_BASE = 'https://whitesmoke-jay-438498.hostingersite.com/api/v1';
 const DELIVERY_PINCODES = ['788001', '788002', '788003', '788004', '788005'];
 const TOKEN_KEY = 'cheesy_mobile_token';
 const REFRESH_KEY = 'cheesy_mobile_refresh';
+const DEFAULT_BUSINESS_SETTINGS = {
+  deliveryFee: 40,
+  freeDeliveryThreshold: 500,
+  minOrderAmount: 100,
+  deliveryRadius: 10,
+  maxGuests: 8,
+};
 
 type Screen = 'menu' | 'cart' | 'booking' | 'orders' | 'profile';
 type OrderType = 'delivery' | 'takeaway';
@@ -55,6 +62,8 @@ type PreorderItem = {
   price: number;
   quantity: number;
 };
+
+type BusinessSettings = typeof DEFAULT_BUSINESS_SETTINGS;
 
 type Session = {
   access_token: string;
@@ -209,6 +218,7 @@ function AppShell() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
+  const [businessSettings, setBusinessSettings] = useState<BusinessSettings>(DEFAULT_BUSINESS_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [authVisible, setAuthVisible] = useState(false);
@@ -229,6 +239,11 @@ function AppShell() {
     setMenu((response.items || []).map(normalizeMenuItem));
   }, []);
 
+  const loadBusinessSettings = useCallback(async () => {
+    const response = await apiRequest<{ settings?: Partial<BusinessSettings> }>('/settings/public');
+    setBusinessSettings({ ...DEFAULT_BUSINESS_SETTINGS, ...(response.settings || {}) });
+  }, []);
+
   const loadOrders = useCallback(async () => {
     if (!token) {
       setOrders([]);
@@ -247,13 +262,13 @@ function AppShell() {
         setToken(savedToken);
         setSession((current) => current || { access_token: savedToken, refresh_token: savedRefresh || undefined });
       }
-      await loadMenu();
+      await Promise.all([loadMenu(), loadBusinessSettings()]);
     } catch (error) {
       showNotice('error', error instanceof Error ? error.message : 'Failed to load app data.');
     } finally {
       setLoading(false);
     }
-  }, [loadMenu, showNotice]);
+  }, [loadBusinessSettings, loadMenu, showNotice]);
 
   useEffect(() => {
     bootstrap();
@@ -466,7 +481,7 @@ function AppShell() {
           <MenuScreen menu={menu} cartCount={cartCount} onAdd={addToCart} refreshing={refreshing} onRefresh={refresh} />
         ) : null}
         {screen === 'cart' ? (
-          <CartScreen cart={cart} total={cartTotal} onQty={changeCartQty} onCheckout={checkout} busy={Boolean(payment)} />
+          <CartScreen cart={cart} total={cartTotal} settings={businessSettings} onQty={changeCartQty} onCheckout={checkout} busy={Boolean(payment)} />
         ) : null}
         {screen === 'booking' ? <BookingScreen menu={menu} onSubmit={createReservation} /> : null}
         {screen === 'orders' ? (
@@ -578,12 +593,14 @@ function MenuScreen({
 function CartScreen({
   cart,
   total,
+  settings,
   onQty,
   onCheckout,
   busy,
 }: {
   cart: CartItem[];
   total: number;
+  settings: BusinessSettings;
   onQty: (itemId: string, delta: number) => void;
   onCheckout: (type: OrderType, address: string, pincode: string) => Promise<void>;
   busy: boolean;
@@ -593,9 +610,13 @@ function CartScreen({
   const [pincode, setPincode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const insets = useSafeAreaInsets();
-  const deliveryFee = orderType === 'delivery' ? 40 : 0;
+  const deliveryFee = orderType === 'delivery' && total < settings.freeDeliveryThreshold ? settings.deliveryFee : 0;
 
   async function submit() {
+    if (total < settings.minOrderAmount) {
+      Alert.alert('Checkout', `Minimum order amount is ${price(settings.minOrderAmount)}.`);
+      return;
+    }
     setSubmitting(true);
     try {
       await onCheckout(orderType, address, pincode);
@@ -645,7 +666,7 @@ function CartScreen({
           <>
             <TextInput style={styles.input} placeholder="Full delivery address" placeholderTextColor="#817767" value={address} onChangeText={setAddress} multiline />
             <TextInput style={styles.input} placeholder="Delivery PIN code" placeholderTextColor="#817767" keyboardType="number-pad" maxLength={6} value={pincode} onChangeText={(value) => setPincode(normalizePincode(value))} />
-            <Text style={styles.helpText}>Delivery only for 788001, 788002, 788003, 788004 and 788005. Others can choose takeaway or book a table.</Text>
+            <Text style={styles.helpText}>Delivery only for 788001, 788002, 788003, 788004 and 788005. Free delivery from {price(settings.freeDeliveryThreshold)}.</Text>
           </>
         ) : null}
 

@@ -1,6 +1,11 @@
 let cartItems = [];
 let cartSubtotal = 0;
 const DELIVERY_PINCODES = ['788001', '788002', '788003', '788004', '788005'];
+let businessSettings = {
+    deliveryFee: 40,
+    freeDeliveryThreshold: 500,
+    minOrderAmount: 100
+};
 
 document.addEventListener('DOMContentLoaded', () => {
     loadCart();
@@ -16,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadCart() {
+    await loadBusinessSettings();
     cartItems = localCart().map(normalizeCartItem);
 
     if (isAuthenticated()) {
@@ -89,6 +95,15 @@ function renderCart() {
     document.getElementById('cart-total').innerText = formatPrice(cartSubtotal + deliveryFee);
 }
 
+async function loadBusinessSettings() {
+    try {
+        const response = await api.request('/settings/public');
+        businessSettings = { ...businessSettings, ...(response.settings || {}) };
+    } catch (error) {
+        console.warn('Using default cart settings:', error.message);
+    }
+}
+
 async function updateQuantity(id, delta) {
     const item = cartItems.find(i => i.id === id);
     if (!item) return;
@@ -146,6 +161,10 @@ async function checkout() {
     }
     if (orderType === 'delivery' && !isDeliveryPincodeAllowed(pincode)) {
         showToast('Delivery is available only for PIN codes 788001, 788002, 788003, 788004 and 788005. Please choose takeaway or book a table.', 'error');
+        return;
+    }
+    if (cartSubtotal < Number(businessSettings.minOrderAmount || 0)) {
+        showToast(`Minimum order amount is ${formatPrice(businessSettings.minOrderAmount)}.`, 'error');
         return;
     }
     if (!isAuthenticated()) {
@@ -306,6 +325,10 @@ function setupCheckoutAuthHandlers() {
                 showToast('Delivery is available only for PIN codes 788001, 788002, 788003, 788004 and 788005. Please choose takeaway or book a table.', 'error');
                 return;
             }
+            if (cartSubtotal < Number(businessSettings.minOrderAmount || 0)) {
+                showToast(`Minimum order amount is ${formatPrice(businessSettings.minOrderAmount)}.`, 'error');
+                return;
+            }
             await processCheckout(checkoutOrderType, checkoutAddress, checkoutPincode);
         } catch (error) {
             message.innerText = error.message;
@@ -316,7 +339,10 @@ function setupCheckoutAuthHandlers() {
 }
 
 function getDeliveryFee() {
-    return document.getElementById('orderType')?.value === 'delivery' ? 40 : 0;
+    const orderType = document.getElementById('orderType')?.value;
+    if (orderType !== 'delivery') return 0;
+    if (cartSubtotal >= Number(businessSettings.freeDeliveryThreshold || 0)) return 0;
+    return Number(businessSettings.deliveryFee || 0);
 }
 
 function normalizePincode(value) {

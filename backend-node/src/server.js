@@ -17,13 +17,23 @@ const API_PREFIX = process.env.API_PREFIX || "/api/v1";
 
 const settings = {
   restaurantName: process.env.RESTAURANT_NAME || "Cheesy Crust Co.",
-  deliveryFee: Number(process.env.DELIVERY_FEE || 40),
-  freeDeliveryThreshold: Number(process.env.FREE_DELIVERY_THRESHOLD || 500),
-  maxGuests: Number(process.env.MAX_GUESTS_PER_TABLE || 8),
   jwtExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "7d",
   refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
   adminEmail: (process.env.ADMIN_EMAIL || "admin@cheesycrust.co").toLowerCase(),
   adminPassword: process.env.ADMIN_PASSWORD || "Admin@123456"
+};
+
+const defaultRestaurantSettings = {
+  restaurantName: settings.restaurantName,
+  restaurantPhone: process.env.RESTAURANT_PHONE || "+916003116277",
+  restaurantEmail: process.env.RESTAURANT_EMAIL || "dine@cheesycrust.co",
+  restaurantAddress: process.env.RESTAURANT_ADDRESS || "Rangirkhari Main Road, Near SBI, Silchar, Assam - 788005",
+  deliveryFee: Number(process.env.DELIVERY_FEE || 40),
+  freeDeliveryThreshold: Number(process.env.FREE_DELIVERY_THRESHOLD || 500),
+  minOrderAmount: Number(process.env.MIN_ORDER_AMOUNT || 100),
+  deliveryRadius: Number(process.env.DELIVERY_RADIUS_KM || 10),
+  maxGuests: Number(process.env.MAX_GUESTS_PER_TABLE || 8),
+  adminPhones: process.env.ADMIN_PHONES || "+916003116277"
 };
 
 const defaultMenuItems = [
@@ -46,7 +56,7 @@ const defaultMenuItems = [
 
 const deliveryPincodes = new Set(["788001", "788002", "788003", "788004", "788005"]);
 
-const corsOrigins = (process.env.CORS_ORIGINS || "https://whitesmoke-jay-438498.hostingersite.com,https://cheesy-crust-co-7w5c.vercel.app,http://localhost:5500,http://127.0.0.1:5500")
+const corsOrigins = (process.env.CORS_ORIGINS || "https://whitesmoke-jay-438498.hostingersite.com,https://cheesy-crust-co-7w5c.vercel.app,https://www.cheesycrustco.in,https://cheesycrustco.in,http://localhost:5500,http://127.0.0.1:5500")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
 
 let db;
@@ -60,6 +70,40 @@ function toJson(value, fallback) {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value !== "string") return value;
   try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function numberSetting(value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function sanitizeRestaurantSettings(input = {}) {
+  const source = { ...defaultRestaurantSettings, ...(input || {}) };
+  return {
+    restaurantName: String(source.restaurantName || defaultRestaurantSettings.restaurantName).trim(),
+    restaurantPhone: String(source.restaurantPhone || defaultRestaurantSettings.restaurantPhone).trim(),
+    restaurantEmail: String(source.restaurantEmail || defaultRestaurantSettings.restaurantEmail).trim(),
+    restaurantAddress: String(source.restaurantAddress || defaultRestaurantSettings.restaurantAddress).trim(),
+    deliveryFee: numberSetting(source.deliveryFee, defaultRestaurantSettings.deliveryFee, { min: 0 }),
+    freeDeliveryThreshold: numberSetting(source.freeDeliveryThreshold, defaultRestaurantSettings.freeDeliveryThreshold, { min: 0 }),
+    minOrderAmount: numberSetting(source.minOrderAmount, defaultRestaurantSettings.minOrderAmount, { min: 0 }),
+    deliveryRadius: numberSetting(source.deliveryRadius, defaultRestaurantSettings.deliveryRadius, { min: 0 }),
+    maxGuests: Math.round(numberSetting(source.maxGuests, defaultRestaurantSettings.maxGuests, { min: 1, max: 100 })),
+    adminPhones: String(source.adminPhones || defaultRestaurantSettings.adminPhones).trim(),
+    updatedAt: source.updatedAt || null
+  };
+}
+
+async function getRestaurantSettings() {
+  const [rows] = await db.execute("SELECT data FROM settings WHERE id='restaurant'");
+  return sanitizeRestaurantSettings(toJson(rows[0]?.data, {}));
+}
+
+async function saveRestaurantSettings(input) {
+  const saved = sanitizeRestaurantSettings({ ...input, updatedAt: new Date().toISOString() });
+  await db.execute("INSERT INTO settings (id,data) VALUES ('restaurant',?) ON DUPLICATE KEY UPDATE data=VALUES(data)", [JSON.stringify(saved)]);
+  return saved;
 }
 
 function normalizePhone(phone) {
@@ -629,8 +673,10 @@ app.post(`${API_PREFIX}/orders/create`, authRequired, asyncRoute(async (req, res
   const deliveryPincode = assertDeliveryAllowed(req.body);
   const items = await pricedItems(req.body.items);
   if (!items.length) return res.status(400).json({ detail: "Order requires at least one item" });
+  const business = await getRestaurantSettings();
   const subtotal = total(items);
-  const deliveryFee = req.body.order_type === "delivery" && subtotal < settings.freeDeliveryThreshold ? settings.deliveryFee : 0;
+  if (subtotal < business.minOrderAmount) return res.status(400).json({ detail: `Minimum order amount is ₹${business.minOrderAmount}` });
+  const deliveryFee = req.body.order_type === "delivery" && subtotal < business.freeDeliveryThreshold ? business.deliveryFee : 0;
   const grand = subtotal + deliveryFee;
   const number = orderNumber();
   const deliveryAddress = req.body.order_type === "delivery" ? `${String(req.body.address).trim()}\nPIN: ${deliveryPincode}` : null;
@@ -669,7 +715,8 @@ app.get(`${API_PREFIX}/orders/:id`, authRequired, asyncRoute(async (req, res) =>
 
 async function availability(date, time, guests) {
   if (!date || !time || !guests) return { available: false, error: "Missing date, time, or guests" };
-  if (guests > settings.maxGuests) return { available: false, error: `Maximum ${settings.maxGuests} guests per table` };
+  const business = await getRestaurantSettings();
+  if (guests > business.maxGuests) return { available: false, error: `Maximum ${business.maxGuests} guests per table` };
   const [[count]] = await db.execute("SELECT COUNT(*) total FROM reservations WHERE date = ? AND time = ? AND status IN ('pending','confirmed')", [date, time]);
   const tables = Math.max(0, 10 - count.total);
   return { available: tables > 0, tables_available: tables, total_tables: 10 };
@@ -814,13 +861,25 @@ app.get(`${API_PREFIX}/admin/order-stats`, adminRequired, asyncRoute(async (_req
   const [rows] = await db.query("SELECT status _id, COUNT(*) count FROM orders GROUP BY status");
   res.json({ success: true, stats: Object.fromEntries(rows.map((r) => [r._id, r.count])), total: rows.reduce((s, r) => s + r.count, 0) });
 }));
+app.get(`${API_PREFIX}/settings/public`, asyncRoute(async (_req, res) => {
+  const business = await getRestaurantSettings();
+  res.json({
+    success: true,
+    settings: {
+      restaurantName: business.restaurantName,
+      deliveryFee: business.deliveryFee,
+      freeDeliveryThreshold: business.freeDeliveryThreshold,
+      minOrderAmount: business.minOrderAmount,
+      deliveryRadius: business.deliveryRadius,
+      maxGuests: business.maxGuests
+    }
+  });
+}));
 app.get(`${API_PREFIX}/admin/settings`, adminRequired, asyncRoute(async (_req, res) => {
-  const [rows] = await db.execute("SELECT data FROM settings WHERE id='restaurant'");
-  res.json({ success: true, settings: toJson(rows[0]?.data, { restaurantName: settings.restaurantName, deliveryFee: settings.deliveryFee, freeDeliveryThreshold: settings.freeDeliveryThreshold, maxGuests: settings.maxGuests }) });
+  res.json({ success: true, settings: await getRestaurantSettings() });
 }));
 app.put(`${API_PREFIX}/admin/settings`, adminRequired, asyncRoute(async (req, res) => {
-  await db.execute("INSERT INTO settings (id,data) VALUES ('restaurant',?) ON DUPLICATE KEY UPDATE data=VALUES(data)", [JSON.stringify(req.body)]);
-  res.json({ success: true, settings: req.body });
+  res.json({ success: true, settings: await saveRestaurantSettings(req.body) });
 }));
 for (const key of ["business-hours", "delivery", "notifications"]) {
   app.get(`${API_PREFIX}/admin/settings/${key}`, adminRequired, asyncRoute(async (_req, res) => {
