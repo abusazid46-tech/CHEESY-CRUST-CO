@@ -867,6 +867,8 @@ app.get(`${API_PREFIX}/settings/public`, asyncRoute(async (_req, res) => {
     success: true,
     settings: {
       restaurantName: business.restaurantName,
+      restaurantPhone: business.restaurantPhone,
+      restaurantEmail: business.restaurantEmail,
       deliveryFee: business.deliveryFee,
       freeDeliveryThreshold: business.freeDeliveryThreshold,
       minOrderAmount: business.minOrderAmount,
