@@ -1,6 +1,6 @@
 const BACKEND_BASE = 'https://whitesmoke-jay-438498.hostingersite.com/api/v1';
 
-module.exports = async function handler(req, res) {
+module.exports = async function proxy(req, res, backendPath) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -10,8 +10,7 @@ module.exports = async function handler(req, res) {
   }
 
   const incomingUrl = new URL(req.url || '/', 'https://proxy.local');
-  const path = incomingUrl.pathname.replace(/^\/api\/v1\/?/, '');
-  const target = `${BACKEND_BASE}/${path}${incomingUrl.search}`;
+  const target = `${BACKEND_BASE}${backendPath}${incomingUrl.search}`;
 
   try {
     const headers = {};
@@ -27,12 +26,7 @@ module.exports = async function handler(req, res) {
         ? req.body
         : JSON.stringify(req.body || {});
 
-    const response = await fetch(target, {
-      method: req.method,
-      headers,
-      body,
-    });
-
+    const response = await fetch(target, { method: req.method, headers, body });
     res.status(response.status);
     response.headers.forEach((value, key) => {
       if (!['content-encoding', 'content-length', 'transfer-encoding'].includes(key.toLowerCase())) {

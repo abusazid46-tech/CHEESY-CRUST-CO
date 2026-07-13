@@ -9,11 +9,9 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const path = Array.isArray(req.query.path) ? req.query.path.join('/') : req.query.path || '';
-  const query = { ...req.query };
-  delete query.path;
-  const search = new URLSearchParams(query).toString();
-  const target = `${BACKEND_BASE}/${path}${search ? `?${search}` : ''}`;
+  const incomingUrl = new URL(req.url || '/', 'https://proxy.local');
+  const path = incomingUrl.pathname.replace(/^\/api\/v1\/?/, '');
+  const target = `${BACKEND_BASE}/${path}${incomingUrl.search}`;
 
   try {
     const headers = {};

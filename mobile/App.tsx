@@ -23,7 +23,7 @@ import {
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 
-const API_BASE = 'https://whitesmoke-jay-438498.hostingersite.com/api/v1';
+const API_BASE = 'https://frontend-chi-taupe-69.vercel.app/api/mobile';
 const DELIVERY_PINCODES = ['788001', '788002', '788003', '788004', '788005'];
 const TOKEN_KEY = 'cheesy_mobile_token';
 const REFRESH_KEY = 'cheesy_mobile_refresh';

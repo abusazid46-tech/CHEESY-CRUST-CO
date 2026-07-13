@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+dist/
+dist-local/
+web-build/
+android/
+ios/
+*.apk
+*.aab
+*.log
+*.jks
+*.keystore
