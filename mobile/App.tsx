@@ -343,7 +343,9 @@ function AppShell() {
         setToken(savedToken);
         setSession((current) => current || { access_token: savedToken, refresh_token: savedRefresh || undefined });
       }
-      await Promise.all([loadMenu(), loadBusinessSettings(), loadOffers()]);
+      await loadMenu();
+      loadBusinessSettings().catch(() => setBusinessSettings(DEFAULT_BUSINESS_SETTINGS));
+      loadOffers().catch(() => setOffers([]));
     } catch (error) {
       showNotice('error', error instanceof Error ? error.message : 'Failed to load app data.');
     } finally {
@@ -362,7 +364,8 @@ function AppShell() {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([loadMenu(), loadOffers()]);
+      await loadMenu();
+      loadOffers().catch(() => setOffers([]));
       if (screen === 'orders') await loadOrders();
     } catch (error) {
       showNotice('error', error instanceof Error ? error.message : 'Refresh failed.');
