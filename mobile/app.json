@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cheesy Crust Co",
     "slug": "cheesy-crust-co",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -11,7 +11,7 @@
     },
     "android": {
       "package": "com.cheesycrustco.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#0D0B08",
         "foregroundImage": "./assets/android-icon-foreground.png",
